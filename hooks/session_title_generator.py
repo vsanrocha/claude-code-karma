@@ -30,11 +30,25 @@ from live_session_tracker import (
 )
 
 # Config
+import re
+
 API_BASE = os.environ.get("CLAUDE_KARMA_API", "http://localhost:8000")
-HAIKU_MODEL = "claude-haiku-4-5-20251001"
 MAX_PROMPT_LENGTH = 500
 MAX_RESPONSE_LENGTH = 300
 TITLE_MAX_WORDS = 10
+
+
+def _strip_system_tags(text: str) -> str:
+    """Remove XML system/skill tags, keeping any real user text around them."""
+    cleaned = re.sub(
+        r"<(?:command-message|system-reminder|command-name|user-prompt-submit-hook)[^>]*>.*?</(?:command-message|system-reminder|command-name|user-prompt-submit-hook)>",
+        "",
+        text,
+        flags=re.DOTALL,
+    )
+    # Also strip self-closing variants
+    cleaned = re.sub(r"<(?:command-message|system-reminder|command-name|user-prompt-submit-hook)[^/]*/?>", "", cleaned)
+    return cleaned.strip()
 
 
 def log_title_generation(
@@ -143,7 +157,9 @@ def extract_session_context(transcript_path: str) -> Tuple[Optional[str], Option
                         texts = [c.get("text", "") for c in content if c.get("type") == "text"]
                         content = " ".join(texts)
                     if isinstance(content, str) and content.strip():
-                        initial_prompt = content.strip()[:MAX_PROMPT_LENGTH]
+                        text = _strip_system_tags(content.strip())
+                        if text:
+                            initial_prompt = text[:MAX_PROMPT_LENGTH]
 
                 elif role == "assistant" and initial_prompt and first_response is None:
                     content = msg.get("content", "")
@@ -188,8 +204,9 @@ def generate_title(
     first_response: Optional[str],
     git_context: Optional[str],
 ) -> Tuple[Optional[str], str]:
-    """Call Claude Haiku to generate a concise session title.
+    """Generate a concise session title via claude CLI (headless mode).
 
+    Uses `claude -p` with haiku model — free with Max subscription.
     Returns (title, source) where source is 'haiku' or 'fallback'.
     """
     parts = [f"User asked: {initial_prompt}"]
@@ -208,27 +225,33 @@ Return ONLY the title, no quotes, no explanation.
 Title:"""
 
     try:
-        import anthropic
+        env = os.environ.copy()
+        env.pop("CLAUDECODE", None)  # Allow nested claude invocation
 
-        client = anthropic.Anthropic()
-        response = client.messages.create(
-            model=HAIKU_MODEL,
-            max_tokens=50,
-            messages=[{"role": "user", "content": prompt}],
+        result = subprocess.run(
+            ["claude", "-p", prompt, "--model", "haiku", "--output-format", "text"],
+            capture_output=True,
+            text=True,
+            timeout=12,
+            env=env,
         )
 
-        title = response.content[0].text.strip()
-        title = title.strip('"\'')
-        words = title.split()
-        if len(words) > TITLE_MAX_WORDS:
-            title = " ".join(words[:TITLE_MAX_WORDS])
-        return title, "haiku"
+        if result.returncode == 0 and result.stdout.strip():
+            title = result.stdout.strip()
+            title = title.strip('"\'')
+            words = title.split()
+            if len(words) > TITLE_MAX_WORDS:
+                title = " ".join(words[:TITLE_MAX_WORDS])
+            return title, "haiku"
 
-    except Exception:
-        fallback = initial_prompt[:60]
-        if len(initial_prompt) > 60:
-            fallback += "..."
-        return fallback, "fallback"
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        pass
+
+    # Fallback: truncated initial prompt
+    fallback = initial_prompt[:60]
+    if len(initial_prompt) > 60:
+        fallback += "..."
+    return fallback, "fallback"
 
 
 def post_title(session_id: str, title: str) -> bool:

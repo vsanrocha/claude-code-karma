@@ -32,7 +32,11 @@ This is a monorepo with three git submodules:
 claude-karma/
 ├── api/                    # FastAPI backend (Python) - port 8000
 ├── frontend/               # SvelteKit frontend (Svelte 5) - port 5173
-└── captain-hook/           # Claude Code hooks Pydantic library
+├── captain-hook/           # Claude Code hooks Pydantic library
+└── hooks/                  # Hook scripts (symlinked from ~/.claude/hooks/)
+    ├── live_session_tracker.py    # Tracks live session state across hook events
+    ├── session_title_generator.py # Generates session titles via Haiku on SessionEnd
+    └── plan_approval.py           # Handles ExitPlanMode permission requests
 ```
 
 Each submodule has its own `CLAUDE.md` with module-specific guidance.
