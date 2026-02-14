@@ -247,3 +247,7 @@ Workflow: `open` → `snapshot -i` → interact via refs → re-snapshot after c
 2. **Frontend changes**: Modify `frontend/src/`, type-check with `npm run check`
 3. **Hook changes**: Modify `captain-hook/`, test with `pytest tests/test_models.py`
 4. **Commit submodule changes**: Commit in submodule first, then update parent repo
+
+## Known Claude Code Bugs
+
+- `classifyHandoffIfNeeded is not defined` — open bug in Claude Code. Task agents (subagents) may fail with this runtime error. Ignore it and proceed; the work is typically completed before the failure. Don't retry agents solely because of this error.
