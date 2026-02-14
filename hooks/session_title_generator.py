@@ -36,6 +36,34 @@ def _strip_system_tags(text: str) -> str:
     return cleaned.strip()
 
 
+def _extract_text(msg: dict) -> str:
+    """Extract plain text from a message's content (handles string and list forms)."""
+    content = msg.get("content", "")
+    if isinstance(content, list):
+        texts = [c.get("text", "") for c in content if c.get("type") == "text"]
+        content = " ".join(texts)
+    return content.strip() if isinstance(content, str) else ""
+
+
+def _get_session_start_iso(transcript_path: str) -> Optional[str]:
+    """Extract the ISO timestamp of the first entry in a JSONL transcript."""
+    try:
+        with open(transcript_path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    ts = entry.get("timestamp")
+                    if ts:
+                        return ts
+                except json.JSONDecodeError:
+                    continue
+    except (OSError, IOError):
+        pass
+    return None
+
 
 def main():
     try:
@@ -93,22 +121,14 @@ def extract_session_context(transcript_path: str) -> Tuple[Optional[str], Option
                     continue
 
                 if role == "user" and initial_prompt is None:
-                    content = msg.get("content", "")
-                    if isinstance(content, list):
-                        texts = [c.get("text", "") for c in content if c.get("type") == "text"]
-                        content = " ".join(texts)
-                    if isinstance(content, str) and content.strip():
-                        text = _strip_system_tags(content.strip())
-                        if text:
-                            initial_prompt = text[:MAX_PROMPT_LENGTH]
+                    text = _strip_system_tags(_extract_text(msg))
+                    if text:
+                        initial_prompt = text[:MAX_PROMPT_LENGTH]
 
                 elif role == "assistant" and initial_prompt and first_response is None:
-                    content = msg.get("content", "")
-                    if isinstance(content, list):
-                        texts = [c.get("text", "") for c in content if c.get("type") == "text"]
-                        content = " ".join(texts)
-                    if isinstance(content, str) and content.strip():
-                        first_response = content.strip()[:MAX_RESPONSE_LENGTH]
+                    text = _extract_text(msg)
+                    if text:
+                        first_response = text[:MAX_RESPONSE_LENGTH]
                         break
     except (OSError, IOError):
         pass
@@ -117,13 +137,23 @@ def extract_session_context(transcript_path: str) -> Tuple[Optional[str], Option
 
 
 def get_git_context(cwd: str, transcript_path: str) -> Optional[str]:
-    """Get git commits made during the session timeframe."""
+    """Get git commits made during the session timeframe.
+
+    Uses the JSONL transcript's first timestamp to scope the git log to
+    the actual session duration rather than an arbitrary fixed window.
+    Falls back to 1 hour if the timestamp can't be extracted.
+    """
     if not cwd or not Path(cwd).exists():
         return None
 
+    since_arg = "1 hour ago"
+    start_ts = _get_session_start_iso(transcript_path)
+    if start_ts:
+        since_arg = start_ts
+
     try:
         result = subprocess.run(
-            ["git", "log", "--oneline", "--since=1 hour ago", "--no-merges", "-10"],
+            ["git", "log", "--oneline", f"--since={since_arg}", "--no-merges", "-10"],
             cwd=cwd,
             capture_output=True,
             text=True,
