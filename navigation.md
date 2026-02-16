@@ -42,33 +42,34 @@ Present on **all pages except home**. Sticky top header with:
 
 ```
 /projects                              List all projects (search, sort, filter)
-  └── /projects/[encoded_name]         Project detail (tabbed)
+  └── /projects/[project_slug]         Project detail (tabbed via ?tab= param)
         ├── Overview (default)         Stats, live sessions, recent sessions
-        │     └── [session card]  ───► /projects/[encoded_name]/[session_slug]
-        ├── Agents tab            ───► /projects/[encoded_name]/agents
-        │     └── [agent]         ───► /projects/[encoded_name]/agents/[name]
-        ├── Skills tab            ───► /projects/[encoded_name]/skills
-        │     └── [file path]     ───► /projects/[encoded_name]/skills/[...path]
-        ├── Analytics tab              Inline charts
-        └── Archived tab               Archived sessions for this project
+        │     └── [session card]  ───► /projects/[project_slug]/[session_slug]
+        ├── Agents tab (?tab=agents)   Agent usage for this project (inline)
+        ├── Skills tab (?tab=skills)   Skill usage for this project (inline)
+        ├── Analytics tab (?tab=analytics)  Inline charts
+        └── Archived tab (?tab=archived)    Archived sessions for this project
 ```
 
 ### Sessions
 
 ```
-/sessions                              All sessions across projects (filter, paginate)
-  └── [session card]              ───► /projects/[encoded_name]/[session_slug]
+/sessions                              All sessions across projects (token search, filter, paginate)
+  └── [session card]              ───► /projects/[project_slug]/[session_slug]
 ```
 
-**Session detail** (`/projects/[encoded_name]/[session_slug]`) shows:
+**Session detail** (`/projects/[project_slug]/[session_slug]`) shows:
 - Conversation messages, timeline, file activity, tools, tasks, plan details
-- Subagent links → subagent detail pages
+- Subagent links → subagent detail page
+
+**Subagent detail** (`/projects/[project_slug]/[session_slug]/agents/[agent_id]`) shows:
+- Individual subagent conversation and activity
 
 ### Agents
 
 ```
 /agents                                All agents (search, category filter)
-  └── [agent card]                ───► /agents/usage/[subagent_type]
+  └── [agent card]                ───► /agents/[name]
 ```
 
 ### Skills
@@ -98,7 +99,9 @@ Present on **all pages except home**. Sticky top header with:
 
 ```
 /plugins                               Plugin list
-  └── [plugin]                    ───► /plugins/[plugin_id]
+  └── [plugin]                    ───► /plugins/[plugin_name]
+        └── Skills                ───► /plugins/[plugin_id]/skills
+              └── [skill file]    ───► /plugins/[plugin_id]/skills/[...path]
 ```
 
 ### Settings
@@ -110,7 +113,7 @@ Present on **all pages except home**. Sticky top header with:
 ### Archived
 
 ```
-/archived                              Archived sessions list
+/archived                              Archived sessions list (client-side search/filter)
 ```
 
 ---
@@ -124,6 +127,7 @@ Interior pages show a breadcrumb trail:
 ```
 Dashboard > Projects > [Project Name] > Agents
 Dashboard > Plans > [Plan Name]
+Dashboard > Plugins > [Plugin Name] > Skills > [Skill Path]
 Dashboard > Settings
 ```
 
@@ -133,12 +137,17 @@ Filters persist via URL search params for shareability and back-button support:
 
 | Param | Used On | Example |
 |-------|---------|---------|
-| `search` | Projects, Sessions, Agents | `?search=karma` |
+| `search` | Projects, Sessions, Agents, Archived | `?search=karma` |
+| `tab` | Project detail | `?tab=agents` |
 | `filter` | Analytics | `?filter=7days` |
-| `project` | Sessions, Plans | `?project=encoded_name` |
+| `project` | Sessions, Plans | `?project=project_slug` |
 | `branch` | Plans | `?branch=main` |
 | `page`, `per_page` | Sessions, Plans, Agents | `?page=2&per_page=24` |
 | `path` | Skills | `?path=hooks/` |
+
+### Token Search (Sessions)
+
+Sessions page uses a token-based search input with keyboard navigation (arrow keys between tokens, backspace to delete).
 
 ### Command Palette
 
@@ -166,17 +175,18 @@ Each section has a dedicated skeleton displayed during navigation transitions (e
 
 ```
 / (Home)
-├─► /projects ─► /projects/[name] ─┬─► Overview ─► /projects/[name]/[session]
-│                                   ├─► Agents  ─► /projects/[name]/agents/[agent]
-│                                   ├─► Skills  ─► /projects/[name]/skills/[...path]
-│                                   ├─► Analytics (inline)
-│                                   └─► Archived (inline)
-├─► /sessions ─► /projects/[name]/[session]
-├─► /agents ──► /agents/usage/[type]
+├─► /projects ─► /projects/[slug] ─┬─► Overview ─► /projects/[slug]/[session]
+│                                   │                  └─► /projects/[slug]/[session]/agents/[id]
+│                                   ├─► Agents (?tab=agents, inline)
+│                                   ├─► Skills (?tab=skills, inline)
+│                                   ├─► Analytics (?tab=analytics, inline)
+│                                   └─► Archived (?tab=archived, inline)
+├─► /sessions ─► /projects/[slug]/[session]
+├─► /agents ──► /agents/[name]
 ├─► /skills ──┬► /skills/[name]
 │             └► /skills/[...path]
 ├─► /plans ───► /plans/[slug]
-├─► /plugins ─► /plugins/[id]
+├─► /plugins ─► /plugins/[name] ─► /plugins/[id]/skills ─► /plugins/[id]/skills/[...path]
 ├─► /analytics
 ├─► /archived
 └─► /settings
