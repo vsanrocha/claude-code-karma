@@ -19,6 +19,7 @@ The home screen is the central hub. It offers two navigation mechanisms:
 | Plans | `/plans` | Browse work plans |
 | Skills | `/skills` | Global skill/tool usage |
 | Agents | `/agents` | Global agent usage |
+| Tools | `/tools` | MCP tool usage |
 | Plugins | `/plugins` | Plugin management |
 | Settings | `/settings` | User configuration |
 | Archived | `/archived` | Archived sessions |
@@ -29,7 +30,7 @@ The home screen is the central hub. It offers two navigation mechanisms:
 
 Present on **all pages except home**. Sticky top header with:
 
-- **Desktop**: Inline links — Projects, Sessions, Plans, Agents, Skills, Plugins, Analytics, Archived
+- **Desktop**: Inline links — Projects, Sessions, Plans, Agents, Skills, Tools, Plugins, Analytics, Archived
 - **Mobile**: Hamburger menu with same links
 - **Settings**: Gear icon (top-right, always visible)
 - **Brand**: "Claude Karma" links back to `/`
@@ -47,6 +48,7 @@ Present on **all pages except home**. Sticky top header with:
         │     └── [session card]  ───► /projects/[project_slug]/[session_slug]
         ├── Agents tab (?tab=agents)   Agent usage for this project (inline)
         ├── Skills tab (?tab=skills)   Skill usage for this project (inline)
+        ├── Tools tab (?tab=tools)     MCP tool usage for this project (inline)
         ├── Analytics tab (?tab=analytics)  Inline charts
         └── Archived tab (?tab=archived)    Archived sessions for this project
 ```
@@ -93,6 +95,14 @@ Present on **all pages except home**. Sticky top header with:
 
 ```
 /analytics                             Time-filtered dashboard (no sub-routes)
+```
+
+### Tools
+
+```
+/tools                                 MCP tools overview (search, filter, grouped/flat views)
+  └── /tools/[server_name]            Server detail (tool breakdown, context split, trend, sessions)
+        └── /tools/[server_name]/[tool_name]  Tool detail (stats, trend chart, sessions)
 ```
 
 ### Plugins
@@ -179,6 +189,7 @@ Each section has a dedicated skeleton displayed during navigation transitions (e
 │                                   │                  └─► /projects/[slug]/[session]/agents/[id]
 │                                   ├─► Agents (?tab=agents, inline)
 │                                   ├─► Skills (?tab=skills, inline)
+│                                   ├─► Tools (?tab=tools, inline)
 │                                   ├─► Analytics (?tab=analytics, inline)
 │                                   └─► Archived (?tab=archived, inline)
 ├─► /sessions ─► /projects/[slug]/[session]
@@ -186,6 +197,7 @@ Each section has a dedicated skeleton displayed during navigation transitions (e
 ├─► /skills ──┬► /skills/[name]
 │             └► /skills/[...path]
 ├─► /plans ───► /plans/[slug]
+├─► /tools ──► /tools/[server_name] ──► /tools/[server_name]/[tool_name]
 ├─► /plugins ─► /plugins/[name] ─► /plugins/[id]/skills ─► /plugins/[id]/skills/[...path]
 ├─► /analytics
 ├─► /archived
