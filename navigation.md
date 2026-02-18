@@ -74,6 +74,10 @@ Present on **all pages except home**. Sticky top header with:
 ```
 /agents                                All agents (search, category filter)
   └── [agent card]                ───► /agents/[name]
+        ├── 🔗 Plugin badge       ───► /plugins/[plugin]     (if category=plugin)
+        ├── 🔗 Activity → Tools  ───► /tools/[srv]/[tool]
+        ├── 🔗 Activity → Skills ───► /skills/[skill]
+        └── 🔗 Overview → Projects ─► /projects/[slug]
 ```
 
 ### Skills
@@ -82,6 +86,8 @@ Present on **all pages except home**. Sticky top header with:
 /skills                                Two tabs:
   ├── Usage Analytics (default)        Skill stats, category filter
   │     └── [skill]               ───► /skills/[skill_name]
+  │           ├── 🔗 Plugin badge ───► /plugins/[plugin]     (if is_plugin)
+  │           └── 🔗 History → Subagent ─► session subagent detail
   └── Browse Files                     File explorer
         └── [path]                ───► /skills/[...path]
 ```
@@ -104,7 +110,10 @@ Present on **all pages except home**. Sticky top header with:
 ```
 /tools                                 MCP tools overview (search, filter, grouped/flat views)
   └── /tools/[server_name]            Server detail (tool breakdown, context split, trend, sessions)
+        ├── 🔗 Plugin badge       ───► /plugins/[plugin]     (if plugin server)
+        ├── 🔗 Plugin card        ───► /plugins/[plugin]     (in overview tab)
         └── /tools/[server_name]/[tool_name]  Tool detail (stats, trend chart, sessions)
+              └── 🔗 Plugin badge ───► /plugins/[plugin]     (inherited from server)
 ```
 
 ### Hooks
@@ -204,27 +213,73 @@ Each section has a dedicated skeleton displayed during navigation transitions (e
 
 ---
 
+## Cross-Links Between Sections (Plugin Loop)
+
+Detail pages link to the parent plugin when the entity belongs to a plugin. This creates a navigable loop: **Plugin → capabilities list**, **Detail page → Plugin badge**.
+
+| From Page | Cross-Link | To Page | Condition |
+|-----------|-----------|---------|-----------|
+| `/agents/[name]` | Plugin badge + metadata | `/plugins/[plugin]` | `category === 'plugin'` |
+| `/agents/[name]` | Activity tab tools | `/tools/[srv]/[tool]` | Tool used by agent |
+| `/agents/[name]` | Activity tab skills | `/skills/[skill]` | Skill invoked by agent |
+| `/agents/[name]` | Overview tab projects | `/projects/[slug]` | Agent used in project |
+| `/tools/[server_name]` | Plugin badge + card | `/plugins/[plugin]` | `plugin_name` exists |
+| `/tools/[server_name]/[tool_name]` | Plugin badge + metadata | `/plugins/[plugin]` | Inherited from server |
+| `/skills/[skill_name]` | Plugin badge + metadata | `/plugins/[plugin]` | `is_plugin === true` |
+| `/skills/[skill_name]` | History tab subagent | Session subagent detail | Invoked by subagent |
+
+### Remaining Gaps (Future Work)
+
+| Gap | From → To | Status |
+|-----|-----------|--------|
+| Plugin → Agent detail | `/plugins/[name]` → `/agents/[name]` | Not linked (shows names only) |
+| Plugin → Skill detail | `/plugins/[name]` → `/skills/[name]` | Not linked (shows names only) |
+| Plugin → Tool detail | `/plugins/[name]` → `/tools/[srv]/[tool]` | Not linked (shows names only) |
+| Tool → Agent types | `/tools/[srv]/[tool]` → `/agents/[name]` | Not linked |
+| Skill → Agent types | `/skills/[name]` → `/agents/[name]` | Not linked |
+| Session subagent → Agent type | Subagent card → `/agents/[name]` | Not linked |
+
+---
+
 ## Full Journey Map
 
 ```
 / (Home)
 ├─► /projects ─► /projects/[slug] ─┬─► Overview ─► /projects/[slug]/[session]
-│                                   │                  └─► /projects/[slug]/[session]/agents/[id]
+│                                   │                  └─► .../agents/[id] (subagent)
 │                                   ├─► Agents (?tab=agents, inline)
 │                                   ├─► Skills (?tab=skills, inline)
 │                                   ├─► Tools (?tab=tools, inline)
 │                                   ├─► Analytics (?tab=analytics, inline)
 │                                   └─► Archived (?tab=archived, inline)
+│
 ├─► /sessions ─► /projects/[slug]/[session]
+│
 ├─► /agents ──► /agents/[name]
+│                   ├── Plugin badge ─────────► /plugins/[plugin]
+│                   ├── Activity → Tools ─────► /tools/[srv]/[tool]
+│                   ├── Activity → Skills ────► /skills/[skill]
+│                   └── Overview → Projects ──► /projects/[slug]
+│
 ├─► /skills ──┬► /skills/[name]
-│             └► /skills/[...path]
+│              │      ├── Plugin badge ───────► /plugins/[plugin]
+│              │      └── History → Subagent ─► session subagent detail
+│              └► /skills/[...path]
+│
 ├─► /plans ───► /plans/[slug]
-├─► /tools ──► /tools/[server_name] ──► /tools/[server_name]/[tool_name]
+│
+├─► /tools ──► /tools/[server_name]
+│                   ├── Plugin badge ─────────► /plugins/[plugin]
+│                   ├── Plugin card ──────────► /plugins/[plugin]
+│                   └──► /tools/[server_name]/[tool_name]
+│                            └── Plugin badge ► /plugins/[plugin]
+│
 ├─► /hooks ──┬► /hooks/[event_type]
-│            ├► /hooks/sources/[source_id]
-│            └► /hooks/scripts/[filename]
+│             ├► /hooks/sources/[source_id]
+│             └► /hooks/scripts/[filename]
+│
 ├─► /plugins ─► /plugins/[name] ─► /plugins/[id]/skills ─► /plugins/[id]/skills/[...path]
+│
 ├─► /analytics
 ├─► /archived
 ├─► /about
