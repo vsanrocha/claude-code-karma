@@ -277,7 +277,9 @@
 					{/if}
 				</button>
 			</div>
-			<div class="markdown-preview max-h-[70vh] overflow-y-auto pr-2 custom-scrollbar">
+			<div
+				class="markdown-preview max-h-[70vh] overflow-y-auto pr-2 custom-scrollbar break-words"
+			>
 				{@html renderedContent}
 			</div>
 			<div class="mt-4 pt-3 border-t border-[var(--border)]">
@@ -306,6 +308,12 @@
 		height: 4em;
 		background: linear-gradient(to bottom, transparent, var(--bg-muted));
 		pointer-events: none;
+	}
+
+	/* Prevent long unbroken text from overflowing */
+	.prompt-content {
+		overflow-wrap: break-word;
+		word-break: break-word;
 	}
 
 	/* Override some markdown-preview styles for prompt context */
