@@ -1387,4 +1387,4 @@ async def get_project_memory(encoded_name: str, request: Request):
         )
     except OSError as e:
         logger.error(f"Error reading memory file for {encoded_name}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to read memory file")
+        raise HTTPException(status_code=500, detail="Failed to read memory file") from e
