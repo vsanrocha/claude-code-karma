@@ -817,6 +817,21 @@ class PlanRelatedSession(BaseModel):
 
 
 # =============================================================================
+# Project Memory Schemas
+# =============================================================================
+
+
+class ProjectMemoryResponse(BaseModel):
+    """Response for a project's MEMORY.md file."""
+
+    content: str = Field(..., description="Full markdown content of MEMORY.md")
+    word_count: int = Field(0, description="Total word count")
+    size_bytes: int = Field(0, description="File size in bytes")
+    modified: datetime = Field(..., description="Last modification time")
+    exists: bool = Field(True, description="Whether the memory file exists")
+
+
+# =============================================================================
 # Live Session Schemas
 # =============================================================================
 
@@ -1325,6 +1340,15 @@ class PluginUsageStats(BaseModel):
     )
     by_mcp_tool: dict[str, int] = Field(
         default_factory=dict, description="MCP tool short name -> call count"
+    )
+    by_agent_daily: dict[str, dict[str, int]] = Field(
+        default_factory=dict, description="Agent name -> {date -> count}"
+    )
+    by_skill_daily: dict[str, dict[str, int]] = Field(
+        default_factory=dict, description="Skill name -> {date -> count}"
+    )
+    by_mcp_tool_daily: dict[str, dict[str, int]] = Field(
+        default_factory=dict, description="MCP tool name -> {date -> count}"
     )
     trend: list[DailyUsage] = Field(default_factory=list, description="Usage trend over time")
     first_used: Optional[datetime] = Field(None, description="First usage timestamp")

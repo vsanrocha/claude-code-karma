@@ -922,6 +922,18 @@ export interface PlanStats {
 	newest_plan: string | null;
 }
 
+/**
+ * Response from /projects/{encoded_name}/memory endpoint.
+ * Contains the project's MEMORY.md content.
+ */
+export interface ProjectMemory {
+	content: string;
+	word_count: number;
+	size_bytes: number;
+	modified: string;
+	exists: boolean;
+}
+
 // ============================================================================
 // Sessions List Types (for /sessions/all endpoint)
 // ============================================================================
@@ -1277,6 +1289,9 @@ export interface PluginUsageStats {
 	by_agent: Record<string, number>;
 	by_skill: Record<string, number>;
 	by_mcp_tool: Record<string, number>;
+	by_agent_daily: Record<string, Record<string, number>>;
+	by_skill_daily: Record<string, Record<string, number>>;
+	by_mcp_tool_daily: Record<string, Record<string, number>>;
 	trend: DailyUsage[];
 	first_used: string | null;
 	last_used: string | null;
