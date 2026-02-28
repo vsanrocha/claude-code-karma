@@ -30,7 +30,9 @@
 		class="w-full max-w-[1000px] mx-auto pt-8 sm:pt-12 md:pt-16 pb-6 md:pb-8 px-4 flex items-center justify-center relative"
 	>
 		<div class="flex flex-col items-center gap-4 md:gap-5">
-			<LogoIcon size={64} class="text-[var(--accent)] md:w-20 md:h-20" />
+			<div class="logo-wrapper logo-wrapper-lg">
+				<img src="/logo.png" alt="Claude Code Karma" class="w-16 h-16 md:w-20 md:h-20 object-contain" />
+			</div>
 			<div class="text-center flex flex-col items-center gap-1">
 				<h1
 					class="text-2xl sm:text-3xl font-semibold tracking-tight text-[var(--text-primary)]"
@@ -58,9 +60,11 @@
 			<div class="flex items-center gap-3">
 				<a
 					href="/"
-					class="flex items-center gap-2 md:gap-3 hover:opacity-80 transition-opacity group text-[var(--accent)] group-hover:text-[var(--accent-hover)] transition-colors"
+					class="flex items-center gap-2 md:gap-3 hover:opacity-80 transition-opacity group"
 				>
-					<LogoIcon size={26} />
+					<div class="logo-wrapper logo-wrapper-sm">
+						<img src="/logo.png" alt="Claude Code Karma" class="w-7 h-7 object-contain" />
+					</div>
 					<h1
 						class="hidden sm:block text-sm font-semibold tracking-tight text-[var(--text-primary)]"
 					>
@@ -293,3 +297,46 @@
 		</div>
 	{/if}
 {/if}
+
+<style>
+	.logo-wrapper {
+		border-radius: 50%;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		transition: background-color 0.3s ease;
+	}
+
+	/* Light mode: dark circular backdrop */
+	.logo-wrapper {
+		background: radial-gradient(circle, #1a1025 60%, transparent 100%);
+	}
+
+	.logo-wrapper-lg {
+		width: 5.5rem;
+		height: 5.5rem;
+	}
+
+	.logo-wrapper-sm {
+		width: 2.25rem;
+		height: 2.25rem;
+	}
+
+	@media (min-width: 768px) {
+		.logo-wrapper-lg {
+			width: 6.5rem;
+			height: 6.5rem;
+		}
+	}
+
+	/* Dark mode: lighter moon-like sphere */
+	:global(:root[data-theme='dark']) .logo-wrapper {
+		background: radial-gradient(circle, #2d2240 55%, transparent 100%);
+	}
+
+	@media (prefers-color-scheme: dark) {
+		:global(:root:not([data-theme='light'])) .logo-wrapper {
+			background: radial-gradient(circle, #2d2240 55%, transparent 100%);
+		}
+	}
+</style>
