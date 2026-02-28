@@ -76,7 +76,7 @@
 
 	$effect(() => {
 		if (browser && !viewModeInitialized) {
-			const saved = localStorage.getItem('claude-karma-server-sessions-view-mode');
+			const saved = localStorage.getItem('claude-code-karma-server-sessions-view-mode');
 			if (saved === 'list' || saved === 'grid') {
 				viewMode = saved;
 			}
@@ -86,7 +86,7 @@
 
 	$effect(() => {
 		if (browser && viewModeInitialized) {
-			localStorage.setItem('claude-karma-server-sessions-view-mode', viewMode);
+			localStorage.setItem('claude-code-karma-server-sessions-view-mode', viewMode);
 		}
 	});
 

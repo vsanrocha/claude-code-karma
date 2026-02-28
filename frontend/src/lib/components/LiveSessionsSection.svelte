@@ -123,7 +123,7 @@
 	// Initialize collapsed state from localStorage
 	$effect(() => {
 		if (typeof window !== 'undefined' && !collapsedInitialized) {
-			const saved = localStorage.getItem('claude-karma-live-section-collapsed');
+			const saved = localStorage.getItem('claude-code-karma-live-section-collapsed');
 			if (saved !== null) {
 				collapsed = saved === 'true';
 			}
@@ -134,7 +134,7 @@
 	// Persist collapsed state
 	$effect(() => {
 		if (typeof window !== 'undefined' && collapsedInitialized) {
-			localStorage.setItem('claude-karma-live-section-collapsed', String(collapsed));
+			localStorage.setItem('claude-code-karma-live-section-collapsed', String(collapsed));
 		}
 	});
 

@@ -47,8 +47,8 @@ Claude Code Karma reads that local data and gives you a proper dashboard. No clo
 
 ```bash
 # Clone the repository
-git clone https://github.com/JayantDevkar/claude-karma.git
-cd claude-karma
+git clone https://github.com/JayantDevkar/claude-code-karma.git
+cd claude-code-karma
 
 # Start API (Terminal 1)
 cd api
@@ -78,7 +78,7 @@ Nothing leaves your machine. The API reads your local files, indexes metadata in
 ## Project Structure
 
 ```
-claude-karma/
+claude-code-karma/
 ├── api/                    # FastAPI backend (Python) — port 8000
 │   ├── models/             # Pydantic models for Claude Code data
 │   ├── routers/            # API endpoints
@@ -175,7 +175,7 @@ This project is licensed under the Apache License 2.0. See [LICENSE](./LICENSE) 
 
 - See [SETUP.md](./SETUP.md) for installation and configuration help
 - Check [CLAUDE.md](./CLAUDE.md) for development guidance
-- Review existing [GitHub Issues](https://github.com/JayantDevkar/claude-karma/issues)
+- Review existing [GitHub Issues](https://github.com/JayantDevkar/claude-code-karma/issues)
 
 ---
 

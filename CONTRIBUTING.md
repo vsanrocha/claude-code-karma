@@ -32,8 +32,8 @@ git --version        # any version
 1. **Clone the repository**
 
 ```bash
-git clone https://github.com/JayantDevkar/claude-karma.git
-cd claude-karma
+git clone https://github.com/JayantDevkar/claude-code-karma.git
+cd claude-code-karma
 ```
 
 2. **Set up the API**
@@ -71,7 +71,7 @@ pytest tests/test_models.py -v
 
 If you find a bug:
 
-1. **Check if it's already reported** — Search [existing issues](https://github.com/JayantDevkar/claude-karma/issues)
+1. **Check if it's already reported** — Search [existing issues](https://github.com/JayantDevkar/claude-code-karma/issues)
 2. **Create a new issue** with:
    - Clear title describing the bug
    - Step-by-step reproduction steps
@@ -83,7 +83,7 @@ If you find a bug:
 
 To suggest a feature:
 
-1. **Check if it's already requested** — Search [existing issues](https://github.com/JayantDevkar/claude-karma/issues)
+1. **Check if it's already requested** — Search [existing issues](https://github.com/JayantDevkar/claude-code-karma/issues)
 2. **Create a new issue** with:
    - Clear title describing the feature
    - Use case and motivation
@@ -315,7 +315,7 @@ For detailed information, see [CLAUDE.md](./CLAUDE.md).
 
 - Check [SETUP.md](./SETUP.md) for installation help
 - See [CLAUDE.md](./CLAUDE.md) for development guidance
-- Ask in [GitHub Discussions](https://github.com/JayantDevkar/claude-karma/discussions) (if available)
+- Ask in [GitHub Discussions](https://github.com/JayantDevkar/claude-code-karma/discussions) (if available)
 - Open an issue for questions
 
 ## License

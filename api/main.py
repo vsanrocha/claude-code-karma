@@ -1,5 +1,5 @@
 """
-Claude Karma API - FastAPI backend for Claude Code session monitoring.
+Claude Code Karma API - FastAPI backend for Claude Code session monitoring.
 
 Run with:
   uvicorn main:app --reload --port 8000
@@ -177,7 +177,7 @@ app.include_router(admin.router)
 @app.get("/")
 def root():
     """Health check endpoint."""
-    return {"status": "ok", "service": "claude-karma-api"}
+    return {"status": "ok", "service": "claude-code-karma-api"}
 
 
 @app.get("/health")

@@ -67,7 +67,7 @@ Claude Code hook scripts fire during session events and write state to `~/.claud
 ## Monorepo Structure
 
 ```
-claude-karma/
+claude-code-karma/
 ├── api/                    # FastAPI backend (Python)
 │   ├── models/             # Pydantic models for JSONL parsing
 │   ├── routers/            # FastAPI route handlers

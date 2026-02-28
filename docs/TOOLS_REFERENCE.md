@@ -1,6 +1,6 @@
 # Claude Code Tools Reference Guide
 
-**Project**: claude-karma
+**Project**: claude-code-karma
 **Purpose**: Comprehensive reference for all tools available to Claude Code agents
 **Last Updated**: 2026-01-06
 **Work Item**: CLAUDEKARM-2
@@ -18,7 +18,7 @@
 7. [Token Costs for Tools](#7-token-costs-for-tools)
 8. [Advanced Tool Use Patterns](#8-advanced-tool-use-patterns)
 9. [Troubleshooting & Common Issues](#9-troubleshooting--common-issues)
-10. [Claude-Karma Project Configuration](#10-claude-karma-project-configuration)
+10. [Claude-Code-Karma Project Configuration](#10-claude-karma-project-configuration)
 
 ---
 
@@ -225,7 +225,7 @@ Command to run bash commands
 
 ### In Claude Code Agents (YAML Configuration)
 
-For claude-karma agents, specify tools in agent.yaml:
+For claude-code-karma agents, specify tools in agent.yaml:
 ```yaml
 tools:
   - name: "bash"
@@ -516,7 +516,7 @@ async def get_claude_tools(mcp_session):
 
 ---
 
-## 10. Claude-Karma Project Configuration
+## 10. Claude-Code-Karma Project Configuration
 
 ### Current MCP Servers
 
@@ -548,7 +548,7 @@ async def get_claude_tools(mcp_session):
 - /commit-commands:* (3 commands)
 - /init, /pr-comments, /statusline, /review, /security-review
 
-### Tool Access for Claude-Karma Agents
+### Tool Access for Claude-Code-Karma Agents
 
 **plane-task-orchestrator**:
 - Task (delegation to subagents)

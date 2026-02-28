@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Benchmark script for Claude Karma API endpoints.
+Benchmark script for Claude Code Karma API endpoints.
 
 Measures latency of SQLite-optimized endpoints.
 
@@ -76,7 +76,7 @@ def benchmark_endpoint(client: httpx.Client, path: str, iterations: int) -> dict
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Benchmark Claude Karma API endpoints")
+    parser = argparse.ArgumentParser(description="Benchmark Claude Code Karma API endpoints")
     parser.add_argument("--iterations", "-n", type=int, default=10, help="Requests per endpoint")
     parser.add_argument("--base-url", default="http://localhost:8000", help="API base URL")
     parser.add_argument("--timeout", type=float, default=30.0, help="Request timeout in seconds")

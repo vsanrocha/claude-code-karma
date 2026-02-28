@@ -398,7 +398,7 @@ function TimelineStats({ events }: { events: TimelineEvent[] }) {
 ```typescript
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import type { TodoItem } from "@claude-karma/types";
+import type { TodoItem } from "@claude-code-karma/types";
 
 interface UseTodosOptions {
   enabled?: boolean;
@@ -456,7 +456,7 @@ import { useTodos } from "@/hooks/use-todos";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ListTodoIcon, CheckCircle2Icon, CircleDotIcon, CircleIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { TodoItem } from "@claude-karma/types";
+import type { TodoItem } from "@claude-code-karma/types";
 
 interface SessionTodosCardProps {
   sessionUuid: string;
@@ -624,7 +624,7 @@ export default function SessionPage({ params }: { params: { uuid: string } }) {
 ```typescript
 import { render, screen } from "@testing-library/react";
 import { TimelineEventCard } from "@/components/timeline-rail";
-import type { TimelineEvent } from "@claude-karma/types";
+import type { TimelineEvent } from "@claude-code-karma/types";
 
 describe("TimelineEventCard - todo_update", () => {
   const todoUpdateEvent: TimelineEvent = {

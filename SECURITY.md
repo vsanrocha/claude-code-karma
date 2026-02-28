@@ -23,7 +23,7 @@ Security concerns for this project primarily involve:
 If you discover a security vulnerability, please report it responsibly:
 
 1. **Do NOT open a public GitHub issue** for security vulnerabilities
-2. **Email:** Open a private security advisory at [GitHub Security Advisories](https://github.com/JayantDevkar/claude-karma/security/advisories/new)
+2. **Email:** Open a private security advisory at [GitHub Security Advisories](https://github.com/JayantDevkar/claude-code-karma/security/advisories/new)
 3. **Include:**
    - Description of the vulnerability
    - Steps to reproduce

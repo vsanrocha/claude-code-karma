@@ -1,5 +1,5 @@
 """
-API response schemas for Claude Karma.
+API response schemas for Claude Code Karma.
 """
 
 from datetime import datetime

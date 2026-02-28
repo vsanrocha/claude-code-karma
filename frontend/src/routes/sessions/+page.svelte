@@ -609,7 +609,7 @@
 	// Initialize from localStorage on mount (client-side only)
 	$effect(() => {
 		if (typeof window !== 'undefined' && !viewModeInitialized) {
-			const saved = localStorage.getItem('claude-karma-sessions-view-mode');
+			const saved = localStorage.getItem('claude-code-karma-sessions-view-mode');
 			if (saved === 'list' || saved === 'grid') {
 				viewMode = saved;
 			}
@@ -620,7 +620,7 @@
 	// Persist view mode changes
 	$effect(() => {
 		if (typeof window !== 'undefined' && viewModeInitialized) {
-			localStorage.setItem('claude-karma-sessions-view-mode', viewMode);
+			localStorage.setItem('claude-code-karma-sessions-view-mode', viewMode);
 		}
 	});
 

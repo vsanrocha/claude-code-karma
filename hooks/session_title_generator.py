@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Session title generator hook for Claude Karma.
+Session title generator hook for Claude Code Karma.
 
 Fires on SessionEnd, reads the session JSONL, extracts context,
 and generates a concise title. Prefers git commit messages when
@@ -239,7 +239,7 @@ Title:"""
 
 
 def post_title(session_id: str, title: str) -> bool:
-    """POST the generated title to the Claude Karma API. Returns True on success."""
+    """POST the generated title to the Claude Code Karma API. Returns True on success."""
     import urllib.request
     import urllib.error
 

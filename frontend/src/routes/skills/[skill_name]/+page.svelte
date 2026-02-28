@@ -79,7 +79,7 @@
 
 	$effect(() => {
 		if (browser && !viewModeInitialized) {
-			const saved = localStorage.getItem('claude-karma-skill-sessions-view-mode');
+			const saved = localStorage.getItem('claude-code-karma-skill-sessions-view-mode');
 			if (saved === 'list' || saved === 'grid') {
 				viewMode = saved;
 			}
@@ -89,7 +89,7 @@
 
 	$effect(() => {
 		if (browser && viewModeInitialized) {
-			localStorage.setItem('claude-karma-skill-sessions-view-mode', viewMode);
+			localStorage.setItem('claude-code-karma-skill-sessions-view-mode', viewMode);
 		}
 	});
 

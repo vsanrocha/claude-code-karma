@@ -32,7 +32,7 @@ The code applies across community spaces and when individuals officially represe
 
 ## Enforcement
 
-Instances of unacceptable behavior may be reported to the project maintainer at [GitHub Issues](https://github.com/JayantDevkar/claude-karma/issues).
+Instances of unacceptable behavior may be reported to the project maintainer at [GitHub Issues](https://github.com/JayantDevkar/claude-code-karma/issues).
 
 All complaints will be reviewed and investigated promptly and fairly. Community leaders are obligated to respect the privacy and security of the reporter.
 

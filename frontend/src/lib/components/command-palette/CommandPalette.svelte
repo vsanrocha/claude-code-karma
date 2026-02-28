@@ -71,7 +71,7 @@
 			| 'puzzle';
 	}
 
-	const RECENT_STORAGE_KEY = 'claude-karma-recent-searches';
+	const RECENT_STORAGE_KEY = 'claude-code-karma-recent-searches';
 	const MAX_RECENT = 4;
 
 	let recentItems = $state<RecentItem[]>([]);

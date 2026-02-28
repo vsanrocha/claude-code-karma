@@ -1,5 +1,5 @@
 """
-Services package for Claude Karma API.
+Services package for Claude Code Karma API.
 
 Contains business logic and data processing services.
 

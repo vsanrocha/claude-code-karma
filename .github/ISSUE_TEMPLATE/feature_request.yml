@@ -1,5 +1,5 @@
 name: Feature Request
-description: Suggest a new feature or improvement for Claude Karma
+description: Suggest a new feature or improvement for Claude Code Karma
 title: "[Feature]: "
 labels: ["enhancement"]
 body:
@@ -12,7 +12,7 @@ body:
     id: component
     attributes:
       label: Component
-      description: Which part of Claude Karma would this affect?
+      description: Which part of Claude Code Karma would this affect?
       options:
         - API (new endpoint / data parsing)
         - Frontend (new page / component / visualization)

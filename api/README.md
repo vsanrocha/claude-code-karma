@@ -17,8 +17,8 @@ Requires Python 3.9+ and Pydantic v2:
 
 ```bash
 # From the monorepo root
-git clone https://github.com/JayantDevkar/claude-karma.git
-cd claude-karma/api
+git clone https://github.com/JayantDevkar/claude-code-karma.git
+cd claude-code-karma/api
 pip install -e ".[dev]"
 pip install -r requirements.txt
 ```

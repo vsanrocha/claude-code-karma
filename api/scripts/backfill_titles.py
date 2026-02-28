@@ -4,7 +4,7 @@ Backfill session titles for sessions that don't have them.
 
 Queries SQLite for sessions with NULL or empty session_titles,
 extracts context from their JSONL files, generates titles via
-Claude Haiku API, and POSTs them to the Claude Karma API.
+Claude Haiku API, and POSTs them to the Claude Code Karma API.
 
 Usage:
     python scripts/backfill_titles.py
@@ -338,7 +338,7 @@ Title:"""
 
 def post_title(session_uuid: str, title: str) -> bool:
     """
-    POST the generated title to the Claude Karma API.
+    POST the generated title to the Claude Code Karma API.
 
     Returns:
         True if successful, False otherwise

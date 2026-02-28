@@ -10,8 +10,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # Clone (no submodule init needed — this is a monorepo)
-git clone https://github.com/JayantDevkar/claude-karma.git
-cd claude-karma
+git clone https://github.com/JayantDevkar/claude-code-karma.git
+cd claude-code-karma
 
 # Start API (terminal 1)
 cd api
@@ -30,7 +30,7 @@ Open http://localhost:5173 to view the dashboard.
 This is a monorepo with all components in a single repository:
 
 ```
-claude-karma/
+claude-code-karma/
 ├── api/                    # FastAPI backend (Python) - port 8000
 ├── frontend/               # SvelteKit frontend (Svelte 5) - port 5173
 ├── captain-hook/           # Claude Code hooks Pydantic library

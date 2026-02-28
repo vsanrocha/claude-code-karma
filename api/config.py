@@ -111,7 +111,7 @@ class Settings(BaseSettings):
     )
 
     # API metadata
-    api_title: str = Field(default="Claude Karma API", description="API title")
+    api_title: str = Field(default="Claude Code Karma API", description="API title")
     api_version: str = Field(default="0.1.0", description="API version")
     api_description: str = Field(
         default="API for monitoring Claude Code session activity",
@@ -155,7 +155,7 @@ class Settings(BaseSettings):
 
     @property
     def karma_base(self) -> Path:
-        """Get the base directory for Claude Karma data."""
+        """Get the base directory for Claude Code Karma data."""
         return Path.home() / ".claude_karma"
 
     @property

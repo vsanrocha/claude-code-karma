@@ -209,7 +209,7 @@ Plain text debug logs per session:
 2026-01-08T13:02:04.118Z [DEBUG] Watching for changes in setting files...
 2026-01-08T13:02:04.125Z [DEBUG] [init] configureGlobalMTLS starting
 2026-01-08T13:02:04.136Z [DEBUG] Applying permission update: Adding 3 allow rule(s)...
-2026-01-08T13:02:04.169Z [DEBUG] Parsed repository: JayantDevkar/claude-karma
+2026-01-08T13:02:04.169Z [DEBUG] Parsed repository: JayantDevkar/claude-code-karma
 ```
 
 ### 4.2 File History (`~/.claude/file-history/`)

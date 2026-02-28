@@ -1,5 +1,5 @@
 """
-SQLite metadata index for Claude Karma.
+SQLite metadata index for Claude Code Karma.
 
 Provides a derived metadata layer over JSONL session files,
 enabling fast queries, filtering, pagination, and full-text search

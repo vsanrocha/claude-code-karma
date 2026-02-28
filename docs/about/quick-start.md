@@ -16,8 +16,8 @@ You must also have Claude Code installed and have existing sessions in `~/.claud
 ## 1. Clone the Repository
 
 ```bash
-git clone https://github.com/JayantDevkar/claude-karma.git
-cd claude-karma
+git clone https://github.com/JayantDevkar/claude-code-karma.git
+cd claude-code-karma
 ```
 
 ## 2. Start the API

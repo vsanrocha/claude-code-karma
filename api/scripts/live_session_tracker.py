@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Live session state tracker for Claude Karma.
+Live session state tracker for Claude Code Karma.
 
 Writes session state to ~/.claude_karma/live-sessions/{slug}.json
 based on Claude Code hook events. Uses slug (human-readable session name)

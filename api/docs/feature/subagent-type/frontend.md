@@ -201,10 +201,10 @@ After the slug badge, add type badge:
 Ensure `SubagentSummary` import/re-export includes new field. Usually just:
 
 ```typescript
-export type { SubagentSummary } from "@claude-karma/types";
+export type { SubagentSummary } from "@claude-code-karma/types";
 ```
 
-No change needed if types are imported directly from `@claude-karma/types`.
+No change needed if types are imported directly from `@claude-code-karma/types`.
 
 ---
 

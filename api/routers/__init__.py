@@ -1,1 +1,1 @@
-"""API routers for Claude Karma."""
+"""API routers for Claude Code Karma."""

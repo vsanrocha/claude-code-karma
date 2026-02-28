@@ -114,7 +114,7 @@ Completed todos should have `line-through` text decoration.
 
 Run existing tests:
 ```bash
-pnpm --filter @claude-karma/web test
+pnpm --filter @claude-code-karma/web test
 ```
 
 Add tests for:

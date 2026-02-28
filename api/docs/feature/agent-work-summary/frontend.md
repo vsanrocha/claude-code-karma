@@ -74,7 +74,7 @@ export interface SubagentSummary {
 ### 1.2 Rebuild Types Package
 
 ```bash
-pnpm --filter @claude-karma/types build
+pnpm --filter @claude-code-karma/types build
 ```
 
 ---
@@ -367,7 +367,7 @@ Add models used section:
 
 import { useState } from 'react';
 import { ChevronDown, ChevronUp, MessageSquare, Wrench } from 'lucide-react';
-import { SubagentSummary } from '@claude-karma/types';
+import { SubagentSummary } from '@claude-code-karma/types';
 import { SubagentTypeBadge } from './subagent-type-badge';
 import { CompletionStatusBadge } from './completion-status-badge';
 import { AgentStats } from './agent-stats';
@@ -696,15 +696,15 @@ describe('SubagentCard', () => {
 ## Validation Checklist
 
 - [ ] Types updated in `packages/types/src/index.ts`
-- [ ] Types package rebuilt: `pnpm --filter @claude-karma/types build`
+- [ ] Types package rebuilt: `pnpm --filter @claude-code-karma/types build`
 - [ ] Format utilities added to `apps/web/lib/format.ts`
 - [ ] CompletionStatusBadge component created
 - [ ] AgentStats component created
 - [ ] SubagentCard updated with new fields
 - [ ] Agents page updated with summary bar
-- [ ] All tests passing: `pnpm --filter @claude-karma/web test`
-- [ ] Lint passes: `pnpm --filter @claude-karma/web lint`
-- [ ] Type-check passes: `pnpm --filter @claude-karma/web type-check`
+- [ ] All tests passing: `pnpm --filter @claude-code-karma/web test`
+- [ ] Lint passes: `pnpm --filter @claude-code-karma/web lint`
+- [ ] Type-check passes: `pnpm --filter @claude-code-karma/web type-check`
 - [ ] Visual review in browser
 
 ---

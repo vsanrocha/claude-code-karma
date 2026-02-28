@@ -55,8 +55,8 @@ claude --version     # Claude CLI (any version)
 **Why:** Gets all components — API, frontend, and hook scripts — in one go.
 
 ```bash
-git clone https://github.com/JayantDevkar/claude-karma.git
-cd claude-karma
+git clone https://github.com/JayantDevkar/claude-code-karma.git
+cd claude-code-karma
 ```
 
 **Verify:**
@@ -123,7 +123,7 @@ Expected response:
 
 The `session_count` should match the number of Claude Code sessions you have. If it's 0, ensure you have sessions in `~/.claude/projects/`.
 
-> **Note:** `GET /` returns a simple liveness probe (`{"status": "ok", "service": "claude-karma-api"}`). Use `GET /health` for detailed SQLite stats.
+> **Note:** `GET /` returns a simple liveness probe (`{"status": "ok", "service": "claude-code-karma-api"}`). Use `GET /health` for detailed SQLite stats.
 
 **To disable SQLite** (slower but functional):
 ```bash
@@ -800,7 +800,7 @@ PUBLIC_API_URL=http://your-api-host:8000 npm run dev
 ### Repository Structure
 
 ```
-claude-karma/
+claude-code-karma/
   api/                     # FastAPI backend (Python)
   frontend/                # SvelteKit frontend (Svelte 5)
   captain-hook/            # Hook type definitions (Python)

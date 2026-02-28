@@ -1,1 +1,1 @@
-"""Claude Karma API - FastAPI backend for Claude Code session monitoring."""
+"""Claude Code Karma API - FastAPI backend for Claude Code session monitoring."""

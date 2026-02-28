@@ -1,1 +1,1 @@
-"""Tests for Claude Karma API."""
+"""Tests for Claude Code Karma API."""

@@ -3,13 +3,13 @@
 Plan approval hook for Claude Code's PermissionRequest hook.
 
 Intercepts ExitPlanMode calls and checks plan approval status
-in claude-karma before allowing Claude to proceed.
+in Claude Code Karma before allowing Claude to proceed.
 
 Decision Logic:
 - If tool is not ExitPlanMode: continue (allow Claude to proceed)
 - If plan status is "approved": allow
 - If plan status is "changes_requested" or has annotations: deny with feedback
-- If plan is pending or API error: deny, prompt user to review in claude-karma UI
+- If plan is pending or API error: deny, prompt user to review in Claude Code Karma UI
 
 Usage:
     This script is called by Claude Code's PermissionRequest hook when
@@ -40,7 +40,7 @@ import urllib.request
 from pathlib import Path
 from typing import Optional
 
-# Claude Karma API base URL
+# Claude Code Karma API base URL
 API_BASE_URL = "http://localhost:8000"
 
 
@@ -129,7 +129,7 @@ def get_active_plan_slug() -> Optional[str]:
 
 def api_get(endpoint: str) -> tuple[Optional[dict], Optional[str]]:
     """
-    Make a GET request to the claude-karma API.
+    Make a GET request to the Claude Code Karma API.
 
     Args:
         endpoint: API endpoint (e.g., "/plans/{slug}/status")
@@ -213,7 +213,7 @@ def format_deny_message(status: str, status_data: dict, annotations: list) -> st
     lines = []
 
     if status == "changes_requested":
-        lines.append("Plan changes have been requested in claude-karma.")
+        lines.append("Plan changes have been requested in Claude Code Karma.")
 
         # Include feedback from latest decision if available
         latest_decision = status_data.get("latest_decision")
@@ -223,7 +223,7 @@ def format_deny_message(status: str, status_data: dict, annotations: list) -> st
                 feedback = feedback[:500] + "..."
             lines.append(f"\nFeedback: {feedback}")
     elif status == "pending":
-        lines.append("Plan is pending review in claude-karma.")
+        lines.append("Plan is pending review in Claude Code Karma.")
         lines.append("Please review and approve the plan before proceeding.")
 
     # Add annotations if any
@@ -270,21 +270,21 @@ def main() -> None:
         output_continue()
         return
 
-    # Query the plan status from claude-karma API
+    # Query the plan status from Claude Code Karma API
     status_data, status_error = api_get(f"/plans/{slug}/status")
 
     if status_error:
-        # API error - deny and ask user to check claude-karma
+        # API error - deny and ask user to check Claude Code Karma
         if "Connection error" in status_error or "timed out" in status_error:
             output_deny(
-                f"Cannot verify plan approval - claude-karma API is not reachable.\n"
+                f"Cannot verify plan approval - Claude Code Karma API is not reachable.\n"
                 f"Please ensure the API is running (uvicorn main:app --port 8000)\n"
                 f"and review the plan at: http://localhost:5173/plans/{slug}"
             )
         elif "Not found" in status_error:
             # Plan not found in API - it might not have been synced yet
             output_deny(
-                f"Plan '{slug}' not found in claude-karma.\n"
+                f"Plan '{slug}' not found in Claude Code Karma.\n"
                 f"Please review the plan at: http://localhost:5173/plans/{slug}"
             )
         else:
@@ -314,7 +314,7 @@ def main() -> None:
     # Status is pending with no annotations - ask user to review
     output_deny(
         f"Plan '{slug}' is pending review.\n"
-        f"Please review and approve the plan in claude-karma before proceeding.\n"
+        f"Please review and approve the plan in Claude Code Karma before proceeding.\n"
         f"Review at: http://localhost:5173/plans/{slug}"
     )
 

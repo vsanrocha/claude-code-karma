@@ -42,7 +42,7 @@ Testing:
 ## Project Structure
 
 ```
-claude-karma-ui/
+claude-code-karma-ui/
 ├── apps/
 │   ├── desktop/              # Electron app
 │   │   ├── main/            # Main process
