@@ -10,7 +10,7 @@ import sqlite3
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 SCHEMA_SQL = """
 -- Schema versioning
@@ -214,6 +214,54 @@ CREATE TABLE IF NOT EXISTS projects (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_slug ON projects(slug);
+
+-- Workflow definitions
+CREATE TABLE IF NOT EXISTS workflows (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    project_path TEXT,
+    graph JSON NOT NULL,
+    steps JSON NOT NULL,
+    inputs JSON,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflows_project ON workflows(project_path);
+
+-- Workflow execution runs
+CREATE TABLE IF NOT EXISTS workflow_runs (
+    id TEXT PRIMARY KEY,
+    workflow_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    input_values JSON,
+    started_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    error TEXT,
+    FOREIGN KEY(workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow ON workflow_runs(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_status ON workflow_runs(status);
+
+-- Individual step execution within a run
+CREATE TABLE IF NOT EXISTS workflow_run_steps (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    step_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    session_id TEXT,
+    prompt TEXT,
+    output TEXT,
+    started_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    error TEXT,
+    FOREIGN KEY(run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_run_steps_run ON workflow_run_steps(run_id);
+CREATE INDEX IF NOT EXISTS idx_run_steps_session ON workflow_run_steps(session_id);
 """
 
 
@@ -425,6 +473,52 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             conn.execute("DELETE FROM subagent_commands")
             # Nudge mtime to force re-index of all sessions
             conn.execute("UPDATE sessions SET jsonl_mtime = jsonl_mtime - 1")
+
+        if current_version < 11:
+            logger.info("Migrating → v11: adding workflow tables")
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS workflows (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    project_path TEXT,
+                    graph JSON NOT NULL,
+                    steps JSON NOT NULL,
+                    inputs JSON,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_workflows_project ON workflows(project_path);
+
+                CREATE TABLE IF NOT EXISTS workflow_runs (
+                    id TEXT PRIMARY KEY,
+                    workflow_id TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    input_values JSON,
+                    started_at TIMESTAMP,
+                    completed_at TIMESTAMP,
+                    error TEXT,
+                    FOREIGN KEY(workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow ON workflow_runs(workflow_id);
+                CREATE INDEX IF NOT EXISTS idx_workflow_runs_status ON workflow_runs(status);
+
+                CREATE TABLE IF NOT EXISTS workflow_run_steps (
+                    id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL,
+                    step_id TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    session_id TEXT,
+                    prompt TEXT,
+                    output TEXT,
+                    started_at TIMESTAMP,
+                    completed_at TIMESTAMP,
+                    error TEXT,
+                    FOREIGN KEY(run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_run_steps_run ON workflow_run_steps(run_id);
+                CREATE INDEX IF NOT EXISTS idx_run_steps_session ON workflow_run_steps(session_id);
+            """)
 
     # Record version
     conn.execute(
