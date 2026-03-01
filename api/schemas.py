@@ -1518,3 +1518,73 @@ class AllSessionsResponse(PaginationMeta):
         default_factory=list, description="Status filter options with counts"
     )
     applied_filters: dict = Field(default_factory=dict, description="Echo of applied filter values")
+
+
+# =============================================================================
+# Workflow Schemas
+# =============================================================================
+
+
+class WorkflowStepSchema(BaseModel):
+    id: str
+    prompt_template: str
+    model: str = "sonnet"
+    tools: list[str] = []
+    max_turns: int = 10
+    condition: Optional[str] = None
+
+
+class WorkflowInputSchema(BaseModel):
+    name: str
+    type: str = "string"
+    required: bool = True
+    default: Optional[str] = None
+    description: Optional[str] = None
+
+
+class WorkflowCreateRequest(BaseModel):
+    name: str
+    description: Optional[str] = None
+    project_path: Optional[str] = None
+    graph: dict
+    steps: list[WorkflowStepSchema]
+    inputs: list[WorkflowInputSchema] = []
+
+
+class WorkflowResponse(BaseModel):
+    id: str
+    name: str
+    description: Optional[str] = None
+    project_path: Optional[str] = None
+    graph: dict
+    steps: list[WorkflowStepSchema]
+    inputs: list[WorkflowInputSchema] = []
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class WorkflowRunStepResponse(BaseModel):
+    id: str
+    step_id: str
+    status: str
+    session_id: Optional[str] = None
+    prompt: Optional[str] = None
+    output: Optional[str] = None
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    error: Optional[str] = None
+
+
+class WorkflowRunResponse(BaseModel):
+    id: str
+    workflow_id: str
+    status: str
+    input_values: Optional[dict] = None
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    error: Optional[str] = None
+    steps: list[WorkflowRunStepResponse] = []
+
+
+class WorkflowRunRequest(BaseModel):
+    input_values: Optional[dict] = None
