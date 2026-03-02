@@ -1669,6 +1669,7 @@ export interface HookScriptDetail {
 
 export interface WorkflowStep {
 	id: string;
+	label?: string | null;
 	prompt_template: string;
 	model: string;
 	tools: string[];
