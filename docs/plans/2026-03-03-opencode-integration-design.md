@@ -1,7 +1,7 @@
 # OpenCode Integration Design
 
 **Date:** 2026-03-03
-**Revised:** 2026-03-03 (v2 — incorporates real schema research + feature parity review)
+**Revised:** 2026-03-03 (v3 — addresses critic review gaps: complete router classification, verified data gaps from real DB, corrected part type mapping)
 **Status:** Approved
 **Goal:** Add OpenCode session support to claude-karma with maximum feature parity, unified views, and source badges.
 
@@ -128,11 +128,31 @@ A common `SessionSource` protocol that both Claude Code (JSONL) and OpenCode (SQ
   "finish": "tool-calls",
   "error": null,
   "summary": false,
-  "variant": "..."
+  "variant": "max"
 }
 ```
 
 **Token fields:** `input`, `output`, `reasoning`, `cache.read`, `cache.write` — richer than Claude Code. `cost` is pre-computed USD float.
+
+**Mode & Agent Fields:** OpenCode has a multi-mode system analogous to oh-my-claudecode:
+- `mode`: `"plan"`, `"build"`, or `"explore"` — orchestration mode
+- `agent`: `"plan"`, `"build"`, or `"explore"` — agent handler (matches mode)
+- `variant`: `"max"` or `null` — temperature/thinking variant (similar to thinking budget preference)
+
+**Real data observed (from opencode.db):**
+| mode | agent | modelID | variant | messages | notes |
+|------|-------|---------|---------|----------|-------|
+| plan | plan | claude-opus-4-5 | max | 25 | Strategic planning mode |
+| build | build | big-pickle (OC) | max | 6 | Code building/execution |
+| build | build | claude-opus-4-5 | (null) | 10 | Building with Opus, no variant |
+| explore | explore | claude-opus-4-5 | (null) | 15 | Codebase exploration |
+| (null) | (null) | (null) | (null) | 4 | Unstructured/raw mode (no mode selected) |
+
+**Mode Semantics:**
+- **plan**: Strategic thinking (like `plan` skill in OMC). Uses `variant: "max"` (extended thinking).
+- **build**: Code execution & generation. Uses `variant: "max"` for complex tasks.
+- **explore**: Codebase exploration & search. May skip variant (cost-optimized).
+- **null**: Raw conversation without mode structure (early sessions or fallback).
 
 ### PartTable (`part`)
 
@@ -147,7 +167,7 @@ A common `SessionSource` protocol that both Claude Code (JSONL) and OpenCode (SQ
 
 **Indexes:** `message_id`, `session_id`
 
-#### 11 Part Types (discriminated on `data.type`)
+#### 12 Part Types (discriminated on `data.type`)
 
 | Type | Purpose | Key Fields in `data` |
 |------|---------|---------------------|
@@ -258,6 +278,7 @@ Every claude-karma endpoint classified for OpenCode support.
 | 11 | Compaction detection | session flags | `PartTable` WHERE `data.type = 'compaction'` + `SessionTable.time_compacting` | |
 | 12 | Analytics | `GET /analytics/projects/{name}` | Aggregate from all tables | sessions_by_date, cost, tokens, tools_used, models_used |
 | 13 | Session archive | session flags | `SessionTable.time_archived` | |
+| 13a | Session permissions | via session detail | `SessionTable.permission` JSON | Array of `{permission, pattern, action}` rules per tool |
 
 ### Partial Parity (build with limitations)
 
@@ -265,37 +286,165 @@ Every claude-karma endpoint classified for OpenCode support.
 |---|---------|-----------|-----------------|
 | 14 | File activity | No explicit file operation tracking. Must infer from tool parts: `data.tool` in (`read`, `write`, `glob`, `grep`) + parse `data.state.input` for paths | `PartTable` type=tool |
 | 15 | Timeline events | Can reconstruct from parts: text→response, tool→tool_call, reasoning→thinking, subtask→subagent_spawn, step-start/finish→step boundaries. **No** todo_update, command_invocation, skill_invocation events | `PartTable` ordered by `time_created` |
-| 16 | Skills tracking | OpenCode has no concept of "skills". `subtask` parts may have a `command` field for slash commands. Map to `commands_used` only | `PartTable` type=subtask with `data.command` |
-| 17 | Commands tracking | Only slash commands that spawn subtasks are trackable via `subtask.command`. No equivalent of Claude Code's text-detected commands | `PartTable` type=subtask |
-| 18 | Session chains | OpenCode uses `parent_id` for subagent sessions, not continuation chains. No `leaf_uuid` / slug-based chain detection. Each session is standalone | `SessionTable.parent_id` |
-| 19 | Models used | Extractable from `MessageTable.data.modelID` + `data.providerID`. Model IDs differ from Anthropic IDs (e.g. `big-pickle` via `opencode` provider) | `MessageTable.data` JSON |
-| 20 | Git activity | `patch` parts track applied git patches (hash + files changed). Less granular than CC file-level tracking | `PartTable` type=patch |
+| 16 | Skills tracking | OpenCode has NO explicit skills system. Mode system exists (`plan`, `build`, `explore`) but differs from OMC. NO slash command inventory. Report skills as empty for OC sessions | `MessageTable.data.mode` (informational only) |
+| 17 | Commands tracking | No slash command system implemented. `subtask` parts may have `data.command` field in future versions but currently unpopulated in real data. Report as empty for now | `PartTable` type=subtask (future use) |
+| 18 | Modes tracking | OpenCode has mode system: `data.mode` ∈ {`"plan"`, `"build"`, `"explore"`, null}. NOT a skill equivalent, but useful for analytics. Expose as new `mode` field in session/message responses | `MessageTable.data.mode` |
+| 19 | Session chains | OpenCode uses `parent_id` for subagent sessions, not continuation chains. No `leaf_uuid` / slug-based chain detection. Each session is standalone | `SessionTable.parent_id` |
+| 20 | Models used | Extractable from `MessageTable.data.modelID` + `data.providerID`. Model IDs differ from Anthropic IDs (e.g. `big-pickle` via `opencode` provider). Also includes `variant` for thinking preference | `MessageTable.data` JSON |
+| 21 | Git activity | `patch` parts track applied git patches (hash + files changed). Less granular than CC file-level tracking | `PartTable` type=patch |
+| 22 | Plan mode | OC has plan mode (mode field on messages) but no standalone plan artifact files. 24 plan messages observed in real data. Show plan-mode conversation segments, not file-based plans | `MessageTable.data.mode = 'plan'` |
+| 23 | Agent analytics | OC child sessions have full token data but cost is always $0. Agent types: `build`, `plan`, `explore` from `message.data.agent` | `SessionTable.parent_id` + `MessageTable.data` in child sessions |
+| 24 | Subagent session detail | OC child sessions are full sessions with messages/parts/tools. Spawned via `task` tool in parent. Max depth = 1 level (hardcoded via permissions) | Child `SessionTable` rows via `parent_id` FK |
 
 ### Claude Code Only (N/A for OpenCode)
 
 | # | Feature | Reason |
 |---|---------|--------|
-| 21 | Live sessions | Hook-driven (`~/.claude_karma/live-sessions/`). OpenCode has no hooks system |
-| 22 | Hooks browser | OpenCode has no hook system |
-| 23 | Plugins browser | OpenCode MCP servers configured differently (in `opencode.json`). Different discovery mechanism |
-| 24 | File history snapshots | CC stores `FileHistorySnapshot` messages. OC has `snapshot` parts but they're filesystem hashes, not file content |
-| 25 | Tool results (stored) | CC stores tool output in `tool-results/*.txt`. OC stores output inline in tool part `data.state.output` |
-| 26 | Session index JSON | CC uses `sessions-index.json` for fast listing. OC already has SQLite (fast by default) |
-| 27 | Desktop session linking | CC has Claude Desktop metadata in `~/Library/Application Support/Claude/`. Not applicable to OC |
-| 28 | Session source (CLI/Desktop) | Existing `session_source` field distinguishes CLI vs Desktop. OC sessions are always CLI-equivalent |
-| 29 | Plan approval hooks | CC-specific hook |
-| 30 | Docs browser | CC-specific |
+| 25 | Live sessions | Hook-driven (`~/.claude_karma/live-sessions/`). OpenCode has no hooks system |
+| 26 | Hooks browser | OpenCode has no hook system |
+| 27 | Plugins browser | OpenCode MCP servers configured differently (in `opencode.json`). Different discovery mechanism |
+| 28 | File history snapshots | CC stores `FileHistorySnapshot` messages. OC has `snapshot` parts but they're filesystem hashes, not file content |
+| 29 | Tool results (stored) | CC stores tool output in `tool-results/*.txt`. OC stores output inline in tool part `data.state.output` |
+| 30 | Session index JSON | CC uses `sessions-index.json` for fast listing. OC already has SQLite (fast by default) |
+| 31 | Desktop session linking | CC has Claude Desktop metadata in `~/Library/Application Support/Claude/`. Not applicable to OC |
+| 32 | Session source (CLI/Desktop) | Existing `session_source` field distinguishes CLI vs Desktop. OC sessions are always CLI-equivalent |
+| 33 | Plan approval hooks | CC-specific hook |
+| 34 | Archived prompts (history.jsonl) | OC has no prompt preservation after session deletion. `time_archived` marks sessions archived (different feature) |
+| 35 | Skills file browser | OC has no `~/.claude/skills/` equivalent. No YAML frontmatter skill files |
+| 36 | Live session sub-statuses | Active/Waiting/Idle/Starting/Ended — hook-driven, OC has no hooks |
 
 ### OpenCode Only (new features)
 
 | # | Feature | Source | Notes |
 |---|---------|--------|-------|
-| 31 | Step-level cost/tokens | `PartTable` type=step-finish | Per-step granularity not available in CC. Show as timeline enhancement |
-| 32 | Session sharing | `SessionShareTable` | Public share URLs with secrets |
-| 33 | Git patch tracking | `PartTable` type=patch | Git commit hashes + files per patch |
-| 34 | Agent switch markers | `PartTable` type=agent | Tracks which agent is active at any point |
-| 35 | API retry events | `PartTable` type=retry | Track API failures/retries |
-| 36 | Permission rules | `PermissionTable` | Per-project tool permission config |
+| 37 | Step-level cost/tokens | `PartTable` type=step-finish | Per-step granularity not available in CC. Show as timeline enhancement |
+| 38 | Session sharing | `SessionShareTable` | Public share URLs with secrets |
+| 39 | Git patch tracking | `PartTable` type=patch | Git commit hashes + files per patch |
+| 40 | Agent switch markers | `PartTable` type=agent | Tracks which agent is active at any point |
+| 41 | API retry events | `PartTable` type=retry | Track API failures/retries |
+| 42 | Permission rules | `PermissionTable` | Per-project tool permission config |
+
+---
+
+## Verified Data Gaps (from real DB analysis)
+
+Findings verified against real OpenCode DB at `~/.local/share/opencode/opencode.db` (4 sessions, 63 messages, 286 parts).
+
+### Git Branch Data — NOT AVAILABLE
+
+OpenCode's SQLite DB contains zero git branch fields. The `project.vcs = "git"` is a type flag only. No column or JSON field in `session`, `message`, or `part` tables stores branch information.
+
+**Mitigation:** Runtime inference via `git -C <directory> rev-parse --abbrev-ref HEAD` using the session's `directory` field. This only reflects the **current** branch at query time — historical branch attribution is impossible without external instrumentation.
+
+**Impact:** Git branch filters and branch badges on session cards will show "unknown" for past OC sessions unless the directory still points to the same branch.
+
+### Cost Data — ALWAYS $0
+
+The `message.data.cost` field is present but **always 0.0** across all observed sessions. OpenCode does not populate cost from providers.
+
+**Mitigation:** Compute cost externally from `data.tokens` + a model pricing lookup table. However, model IDs are OpenCode aliases (e.g., `big-pickle` via `opencode` provider), not standard Anthropic model IDs. A `modelID → pricing` mapping must be maintained.
+
+**Impact:** Cost analytics for OC sessions will either be $0 (raw) or require a configurable pricing table. Mark cost as "estimated" in the UI for OC sessions.
+
+### Part Types — Schema vs Reality
+
+The design references 11 part types from OpenCode's TypeScript source. Only 6 exist in real data:
+
+| Part Type | In Real DB? | Notes |
+|-----------|------------|-------|
+| `text` | Yes | |
+| `reasoning` | Yes | |
+| `tool` | Yes | 91 instances |
+| `step-start` | Yes | |
+| `step-finish` | Yes | |
+| `patch` | Yes | 1 instance — hash is OC-internal, NOT a git commit hash |
+| `subtask` | **No** | Subagents spawned via `task` tool + child session row instead |
+| `agent` | **No** | Agent identity tracked via `message.data.agent` field instead |
+| `compaction` | **No** | Compaction tracked via `session.time_compacting` timestamp instead |
+| `file` | **No** | Not observed |
+| `snapshot` | **No** | `step-start`/`step-finish` have snapshot hash refs |
+| `retry` | **No** | Not observed |
+
+**Impact:** Timeline event mapping for `subtask`, `agent`, `compaction`, `retry` part types should gracefully handle absence. Use message-level `agent` field and session-level `time_compacting` as fallbacks.
+
+### Plan Mode — MODE, NOT ARTIFACT
+
+OpenCode has plan mode (`message.data.mode = 'plan'`, 24 messages observed in 1 session). Unlike Claude Code's plan files in `~/.claude/plans/`, OpenCode's plans are embedded in the message conversation. There is no standalone plan file to display.
+
+**Impact:** The Plans page can show OC plan-mode conversation segments filtered by `mode = 'plan'`, but the plan file viewer/download feature is CC-only.
+
+### Subagent Architecture Differences
+
+| Aspect | Claude Code | OpenCode |
+|--------|-------------|----------|
+| Storage | Separate `agent-*.jsonl` file | Child session row (same DB) |
+| Spawn mechanism | Tool use → new JSONL | `task` tool → child session with `parent_id` |
+| Agent type | Filename pattern | `message.data.agent` field (`build`, `plan`, `explore`) |
+| Max depth | Multi-level | 1 level (hardcoded via permission deny rules) |
+| Cost tracking | Available (`costUSD`) | Broken ($0 always) |
+| Token tracking | Per-message in JSONL | Per-message in DB (input, output, reasoning, cache.read, cache.write) |
+
+### Recommended Subagent Query
+
+```sql
+SELECT
+    child.id as subagent_id,
+    child.slug,
+    child.title,
+    child.parent_id,
+    parent.slug as parent_slug,
+    (child.time_updated - child.time_created) as duration_ms,
+    (SELECT json_extract(data, '$.agent') FROM message
+     WHERE session_id = child.id
+     AND json_extract(data, '$.role') = 'assistant' LIMIT 1) as agent_type,
+    (SELECT SUM(json_extract(data, '$.tokens.total')) FROM message
+     WHERE session_id = child.id
+     AND json_extract(data, '$.role') = 'assistant') as total_tokens,
+    (SELECT COUNT(*) FROM part WHERE session_id = child.id
+     AND json_extract(data, '$.type') = 'tool') as tool_count
+FROM session child
+JOIN session parent ON child.parent_id = parent.id
+```
+
+---
+
+## OpenCode Modes, Agents & Skills System (NEW RESEARCH)
+
+OpenCode has a built-in multi-mode orchestration system comparable to oh-my-claudecode's mode infrastructure.
+
+### Three Execution Modes
+
+| Mode | Purpose | Agent | Model Preference | Thinking | Real Usage |
+|------|---------|-------|------------------|----------|-----------|
+| **plan** | Strategic reasoning, requirements gathering, planning | plan | claude-opus-4-5 | Extended (variant="max") | 25 messages observed |
+| **build** | Code generation, implementation, execution | build | big-pickle (OC proprietary) or claude-opus-4-5 | Max for complex (variant="max"), null for simple | 16 messages observed |
+| **explore** | Codebase analysis, file discovery, search | explore | claude-opus-4-5 | No thinking (variant=null) | 15 messages observed |
+| *(none)* | Unstructured conversation | *(implicit)* | *(varies)* | No thinking | 4 messages observed (legacy) |
+
+**Implementation note:** Each mode message carries both `mode` and `agent` fields (currently always matching), but `agent` appears to be the more granular identifier.
+
+### Skills & Commands
+
+OpenCode does NOT have an explicit "skills" system like oh-my-claudecode. However:
+
+1. **Slash commands in subtasks** (`subtask.command` field):
+   - Commands are stored in `PartTable` entries with `type: "subtask"` and `data.command` field
+   - These represent spawned subagents with explicit commands
+   - **Current observation:** No slash commands found in real data (subtask parts exist but no `command` field populated)
+
+2. **Project-level commands configuration** (`project.commands` field):
+   - ProjectTable has a `commands` column (JSON-typed, currently null in real data)
+   - Schema suggests: `{ start?: string }` — only startup command support
+   - Not yet used for skill/command registration in observed sessions
+
+3. **Tool access control** (`PermissionTable`):
+   - Per-project tool permission rules (not per-command)
+   - Cannot directly map to OMC's "skills" concept
+
+**Mapping for claude-karma:**
+- **Skills:** Report as empty for OpenCode (not supported)
+- **Commands:** Only include subtask commands if `data.command` is present; otherwise skip
+- **Modes:** Expose as new `mode` field in session/message detail (useful for analytics, but not searchable like OMC skills)
 
 ---
 
@@ -348,7 +497,28 @@ Every claude-karma endpoint classified for OpenCode support.
 | `data.tokens.cache.read` | `cache_read_input_tokens` | Direct map to CC equivalent |
 | `data.tokens.cache.write` | `cache_creation_input_tokens` | Direct map to CC equivalent |
 | `data.tokens.total` | `total_tokens` | Computed or direct |
-| `data.cost` | `cost` | Pre-computed USD. Do NOT re-compute from pricing table |
+| `data.cost` | `cost` | Pre-computed USD — but **always $0** in real data (see Verified Data Gaps) |
+
+### Derived Metrics (Verified Formulas)
+
+| Metric | Formula | Notes |
+|--------|---------|-------|
+| Session duration | `session.time_updated - session.time_created` | Milliseconds. Range observed: 44s to 53min |
+| Response latency | `data.time.completed - data.time.created` | Per assistant message, ms. Range: 4–56s |
+| Cache hit rate | `cache_read / NULLIF(cache_read + input_tokens, 0) * 100` | Use NULLIF guard. Range: 0% (cold start) to 99.99% |
+| Message count | `COUNT(*) FROM message WHERE session_id = ?` | Separate user/assistant via `json_extract(data, '$.role')` |
+| Cost | **Cannot compute from DB** — `data.cost` always $0 | Requires external `modelID → pricing` mapping. Model IDs are OC aliases (e.g., `big-pickle`) |
+| Tool count | `COUNT(*) FROM part WHERE session_id = ? AND json_extract(data, '$.type') = 'tool'` | 8 tool types observed: read, grep, bash, glob, question, write, todowrite, task |
+
+### Message Metadata (Mode, Agent, Variant)
+
+| OpenCode Field | Claude-Karma Field | Notes |
+|----------------|-------------------|-------|
+| `data.mode` | `mode` | `"plan"`, `"build"`, `"explore"`, or null — new field (CC has no equivalent) |
+| `data.agent` | `agent` | Corresponds to mode; mostly redundant but track both |
+| `data.variant` | `variant` | `"max"` (extended thinking) or null. New field for tracking thinking preference |
+| `data.modelID` | `model` | Direct (e.g., `"big-pickle"`, `"claude-opus-4-5"`) |
+| `data.providerID` | `provider` | Direct (e.g., `"opencode"`, `"anthropic"`) |
 
 ### Tool Usage
 
@@ -456,21 +626,21 @@ Both `ClaudeCodeSource` and `OpenCodeSource` implement this. Methods that return
 
 OpenCode parts → claude-karma TimelineEvent types:
 
-| Part Type | TimelineEvent Type | Fields |
-|-----------|-------------------|--------|
-| `text` (in user msg) | `prompt` | timestamp from message |
-| `text` (in assistant msg) | `response` | timestamp, text preview |
-| `tool` | `tool_call` | tool name, status, duration, input/output preview |
-| `reasoning` | `thinking` | duration from `time.start`→`time.end` |
-| `subtask` | `subagent_spawn` | agent name, prompt, description |
-| `step-start` | `step_boundary` | snapshot ref (new event type) |
-| `step-finish` | `step_boundary` | cost, tokens, finish reason (new event type) |
-| `patch` | `git_patch` | hash, files changed (new event type) |
-| `compaction` | `compaction` | auto vs manual (new event type) |
-| `agent` | `agent_switch` | agent name (new event type) |
-| `retry` | `api_retry` | attempt number, error (new event type) |
+| Part Type | TimelineEvent Type | Verified in Real DB? | Fields |
+|-----------|-------------------|---------------------|--------|
+| `text` (in user msg) | `prompt` | Yes | timestamp from message |
+| `text` (in assistant msg) | `response` | Yes | timestamp, text preview |
+| `tool` | `tool_call` | Yes (91 instances) | tool name, status, duration, input/output preview |
+| `reasoning` | `thinking` | Yes (38 instances) | duration from `time.start`→`time.end` |
+| `subtask` | `subagent_spawn` | **No — use `task` tool parts instead** | agent name, prompt, description |
+| `step-start` | `step_boundary` | Yes (56 instances) | snapshot ref (new event type) |
+| `step-finish` | `step_boundary` | Yes (56 instances) | cost, tokens, finish reason (new event type) |
+| `patch` | `git_patch` | Yes (1 instance — hash is OC-internal, not git commit) | hash, files changed (new event type) |
+| `compaction` | `compaction` | **No — check `session.time_compacting` instead** | auto vs manual (new event type) |
+| `agent` | `agent_switch` | **No — check `message.data.agent` field instead** | agent name (new event type) |
+| `retry` | `api_retry` | **No — not observed** | attempt number, error (new event type) |
 
-**New timeline event types** (`step_boundary`, `git_patch`, `compaction`, `agent_switch`, `api_retry`) are OpenCode-specific but could be useful for Claude Code too in the future.
+**New timeline event types** (`step_boundary`, `git_patch`, `compaction`, `agent_switch`, `api_retry`) are OpenCode-specific but could be useful for Claude Code too in the future. Types marked as not verified should gracefully handle absence — use the noted fallback fields instead.
 
 ---
 
@@ -489,7 +659,7 @@ Claude-karma uses `~/.claude_karma/metadata.db` for fast queries (session index,
 | `subagent_invocations` | Yes | From `parent_id` relationships |
 | `subagent_tools` | Yes | Tools used in child sessions |
 
-**Schema change needed:** Add `data_source TEXT DEFAULT 'claude_code'` column to `sessions` table.
+**Schema change needed:** Add `data_source TEXT DEFAULT 'claude_code'` column to `sessions` table. Bump `SCHEMA_VERSION` (currently 8 → 9) in `api/db/connection.py` to trigger migration.
 
 **Indexing approach:** On API startup or manual refresh, scan `opencode.db` and upsert into metadata DB. Use `time_updated` for incremental sync.
 
@@ -522,7 +692,18 @@ api/
 │   ├── analytics.py           # MODIFIED — aggregate across sources
 │   ├── tools.py               # MODIFIED — merge tool usage from both sources
 │   ├── agents.py              # MODIFIED — merge agent data from both sources
-│   └── commands.py            # MODIFIED — merge command data
+│   ├── commands.py            # MODIFIED — merge command data
+│   ├── agent_analytics.py     # MODIFIED — index OC child sessions into subagent analytics
+│   ├── subagent_sessions.py   # MODIFIED — support OC child sessions as subagent detail views
+│   ├── plans.py               # PARTIAL — show OC plan-mode messages (no standalone plan files)
+│   ├── skills.py              # MODIFIED — merge OC tool/command data into skills view
+│   ├── admin.py               # MODIFIED — reindex endpoint includes OC sessions
+│   ├── settings.py            # MODIFIED — OpenCode DB path configuration
+│   ├── live_sessions.py       # UNCHANGED — CC-Only (hook-driven)
+│   ├── hooks.py               # UNCHANGED — CC-Only
+│   ├── plugins.py             # UNCHANGED — CC-Only (different plugin system)
+│   ├── history.py             # UNCHANGED — CC-Only (no OC equivalent)
+│   └── docs.py                # UNCHANGED — reads project docs, not data-source-specific
 ├── db/
 │   └── connection.py          # MODIFIED — add data_source column migration
 └── utils.py                   # MODIFIED — add opencode DB path discovery
@@ -626,6 +807,32 @@ def connect_opencode_db(db_path: Path) -> sqlite3.Connection:
 8. **Field naming** — Use `data_source` (not `source`) to avoid conflict with existing `session_source`
 9. **Project deduplication** — Same path in both sources = combined project entry
 10. **Metadata DB indexing** — OpenCode sessions indexed into `~/.claude_karma/metadata.db` for fast queries
+
+---
+
+## Router Classification
+
+Every router in `api/routers/` classified for OpenCode integration:
+
+| Router | Status | Notes |
+|--------|--------|-------|
+| `projects.py` | MODIFIED | Merge results from both sources |
+| `sessions.py` | MODIFIED | Merge results from both sources |
+| `analytics.py` | MODIFIED | Aggregate across sources |
+| `tools.py` | MODIFIED | Merge tool usage from both sources |
+| `agents.py` | MODIFIED | Merge agent data from both sources |
+| `commands.py` | MODIFIED | Merge command data |
+| `skills.py` | MODIFIED | Merge skill/command data (partial — OC has no skill files, only `subtask.command` slash commands from `task` tool parts) |
+| `agent_analytics.py` | MODIFIED | Index OC child sessions (via `parent_id`) into `subagent_invocations` table. OC provides tokens per subagent but cost is always $0. Agent types from `message.data.agent` field: `build`, `plan`, `explore` |
+| `subagent_sessions.py` | MODIFIED | Support OC child sessions as subagents. OC child sessions have full messages/parts/tools queryable from the same SQLite DB via `parent_id` FK. Max depth = 1 level |
+| `plans.py` | PARTIAL | OC has plan mode (`message.data.mode = 'plan'`), but no separate plan artifact files like CC's `~/.claude/plans/`. Plan content is embedded in message conversation. Can show plan-mode messages as "plans" but no standalone plan file viewer |
+| `admin.py` | MODIFIED | `/admin/reindex` must also index OC sessions into metadata DB. Add `data_source` parameter to reindex endpoint |
+| `live_sessions.py` | N/A (CC-Only) | Hook-driven, OC has no hooks system |
+| `hooks.py` | N/A (CC-Only) | OC has no hook system |
+| `plugins.py` | N/A (CC-Only) | OC uses `@opencode-ai/plugin` with separate config. No automatic discovery mechanism equivalent to CC's MCP JSON. Future phase could add OC plugin discovery from `opencode.json` |
+| `docs.py` | UNCHANGED | Reads from project's own `docs/about/` directory — not data-source-specific. Works identically for both sources |
+| `history.py` | N/A (CC-Only) | OC has no equivalent of `~/.claude/history.jsonl` for archived prompts. OC's `time_archived` on sessions is a different feature (marks session as archived, not prompt preservation after deletion) |
+| `settings.py` | MODIFIED | Add OpenCode DB path config. Existing CC-specific settings (retention, permissions, plugins) remain CC-only |
 
 ---
 
