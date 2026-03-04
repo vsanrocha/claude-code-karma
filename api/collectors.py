@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set
 
-from command_helpers import classify_invocation
+from command_helpers import classify_invocation, is_command_category, is_skill_category
 from config import FILE_TOOL_MAPPINGS
 from models import AssistantMessage, Session, ToolUseBlock, UserMessage
 from models.conversation import ConversationEntity
@@ -199,10 +199,10 @@ def _collect_conversation_data_core(
                     if tool_name == "Skill" and block.input:
                         skill_name = block.input.get("skill")
                         if skill_name:
-                            kind = classify_invocation(skill_name)
-                            if kind == "skill":
+                            kind = classify_invocation(skill_name, source="skill_tool")
+                            if is_skill_category(kind):
                                 data.skills[skill_name] += 1
-                            else:
+                            elif is_command_category(kind):
                                 data.commands[skill_name] += 1
 
                     # Extract file operations using shared utility
@@ -387,10 +387,10 @@ def _collect_subagent_data(subagent, data: SessionData) -> None:
                     if tool_name == "Skill" and block.input:
                         skill_name = block.input.get("skill")
                         if skill_name:
-                            kind = classify_invocation(skill_name)
-                            if kind == "skill":
+                            kind = classify_invocation(skill_name, source="skill_tool")
+                            if is_skill_category(kind):
                                 data.subagent_skill_counts[skill_name] += 1
-                            else:
+                            elif is_command_category(kind):
                                 data.subagent_command_counts[skill_name] += 1
 
 
@@ -456,10 +456,10 @@ def collect_subagent_info(
                         if block.name == "Skill" and block.input:
                             skill_name = block.input.get("skill")
                             if skill_name:
-                                kind = classify_invocation(skill_name)
-                                if kind == "skill":
+                                kind = classify_invocation(skill_name, source="skill_tool")
+                                if is_skill_category(kind):
                                     skill_counts[skill_name] += 1
-                                else:
+                                elif is_command_category(kind):
                                     command_counts[skill_name] += 1
 
         # Match subagent to Task invocation

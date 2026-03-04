@@ -19,6 +19,8 @@ from command_helpers import (
     classify_invocation,
     detect_slash_commands_in_text,
     expand_plugin_short_name,
+    is_command_category,
+    is_skill_category,
     parse_command_from_content,
 )
 
@@ -52,36 +54,30 @@ if TYPE_CHECKING:
     pass
 
 
-def _link_command_to_skill(commands: set[tuple], skills: Counter) -> None:
-    """Upgrade skills to manual when triggered by a same-plugin command.
+def _apply_command_triggered(pending_command_plugins: set[str], skills: Counter) -> None:
+    """Upgrade skill_tool to command_triggered when a command from the same plugin fired.
 
-    When session has:
-    - A command from plugin X (e.g., superpowers:brainstorm) in user_prompt_commands
-    - A skill_tool call for a skill from plugin X (e.g., superpowers:brainstorming)
-    → Upgrade the skill from skill_tool to slash_command.
+    Called after processing each AssistantMessage's Skill tool calls.
+    If a pending command from plugin X exists and a skill_tool call for plugin X
+    is found, the skill source is upgraded to command_triggered.
 
-    Heuristic: same plugin prefix = linked.
+    Args:
+        pending_command_plugins: Set of plugin prefixes from commands detected
+            in the preceding UserMessage (e.g., {"superpowers"}).
+        skills: Counter with (skill_name, source) tuple keys. Modified in-place.
     """
-    # Collect plugin prefixes from commands
-    command_plugins: set[str] = set()
-    for name, _source in commands:
-        if ":" in name:
-            command_plugins.add(name.split(":")[0])
-
-    if not command_plugins:
+    if not pending_command_plugins:
         return
 
-    # Find skill_tool entries whose plugin prefix matches a command
     for key in list(skills.keys()):
         name, source = key
         if source != "skill_tool" or ":" not in name:
             continue
         plugin = name.split(":")[0]
-        if plugin in command_plugins:
-            # Upgrade to slash_command
+        if plugin in pending_command_plugins:
             count = skills.pop(key)
-            sc_key = (name, "slash_command")
-            skills[sc_key] = skills.get(sc_key, 0) + count
+            ct_key = (name, "command_triggered")
+            skills[ct_key] = skills.get(ct_key, 0) + count
 
 
 def _dedup_invocation_sources(counter: Counter) -> None:
@@ -96,6 +92,9 @@ def _dedup_invocation_sources(counter: Counter) -> None:
       - skill_tool alone → skill_tool               (Claude auto-invoked)
       - text_detection alone → text_detection        (user typed /cmd, Claude didn't run it)
       - slash_command alone → slash_command           (user typed /cmd via tags, Claude didn't run it)
+
+    Note: command_triggered source is NOT subject to dedup — it represents a
+    distinct invocation path (command triggered skill) and is never absorbed.
     """
     by_name: dict[str, list[str]] = {}
     for name, source in list(counter.keys()):
@@ -354,6 +353,9 @@ class Session(BaseModel):
         commands: Counter[tuple] = Counter()  # {(name, source): count}
         user_prompt_skills: Set[tuple] = set()  # {(name, source)}
         user_prompt_commands: Set[tuple] = set()  # {(name, source)}
+        pending_command_plugins: set[str] = (
+            set()
+        )  # plugin prefixes from most recent UserMessage command
         git_branches: Set[str] = set()
         working_dirs: Set[str] = set()
         models_used: Set[str] = set()
@@ -405,19 +407,26 @@ class Session(BaseModel):
                             expanded = expand_plugin_short_name(candidate)
                             # Only detect skills — builtins always have <command-message>
                             # tags when actually invoked, so they're caught above.
-                            if classify_invocation(expanded) == "skill":
+                            kind = classify_invocation(expanded)
+                            if is_skill_category(kind):
                                 user_prompt_skills.add((expanded, "text_detection"))
-                            elif classify_invocation(expanded) not in ("builtin", "agent"):
+                            elif is_command_category(kind):
                                 user_prompt_commands.add((expanded, "text_detection"))
+                                # Also track plugin prefix for command→skill linkage
+                                if ":" in expanded:
+                                    pending_command_plugins.add(expanded.split(":")[0])
                     if cmd_name:
                         kind = classify_invocation(cmd_name)
-                        if kind == "skill":
+                        if is_skill_category(kind):
                             user_prompt_skills.add((cmd_name, source))
-                        elif kind != "agent":
-                            # "command" and "builtin" go into commands.
-                            # "agent" entries are skipped — tracked separately
-                            # in subagent_invocations.
+                        elif is_command_category(kind):
+                            # "user_command", "builtin_command", and "plugin_command"
+                            # go into commands. "agent" entries are skipped —
+                            # tracked separately in subagent_invocations.
                             user_prompt_commands.add((cmd_name, source))
+                            # Track plugin prefix for turn-based command→skill linkage
+                            if ":" in cmd_name:
+                                pending_command_plugins.add(cmd_name.split(":")[0])
             elif isinstance(msg, AssistantMessage):
                 assistant_msg_count += 1
             elif isinstance(msg, FileHistorySnapshot):
@@ -458,14 +467,18 @@ class Session(BaseModel):
                             if skill_name:
                                 # Normalize short-form plugin names
                                 skill_name = expand_plugin_short_name(skill_name)
-                                kind = classify_invocation(skill_name)
-                                if kind == "skill":
+                                kind = classify_invocation(skill_name, source="skill_tool")
+                                if is_skill_category(kind):
                                     skills[(skill_name, "skill_tool")] += 1
-                                elif kind != "agent":
-                                    # "command" and "builtin" go into commands.
+                                elif is_command_category(kind):
+                                    # "user_command" and "builtin_command" go into commands.
                                     # "agent" entries are skipped — tracked separately
                                     # in subagent_invocations.
                                     commands[(skill_name, "skill_tool")] += 1
+
+                # Command→skill linkage applied after the message loop
+                # (see _apply_command_triggered below) since Skill tool
+                # calls may come in later assistant messages.
 
             # Git branches
             git_branch = getattr(msg, "git_branch", None)
@@ -486,12 +499,19 @@ class Session(BaseModel):
             if key not in commands:
                 commands[key] += 1
 
-        # Command→Skill linkage: when a command from plugin X triggered a skill
-        # from plugin X, upgrade the skill to slash_command (manual).
-        _link_command_to_skill(user_prompt_commands, skills)
-
         _dedup_invocation_sources(skills)
         _dedup_invocation_sources(commands)
+
+        # Apply command→skill linkage: when a plugin command fired (e.g.
+        # superpowers:brainstorm) and a skill from the same plugin was
+        # invoked (superpowers:brainstorming), upgrade the skill source
+        # to "command_triggered".  Done after dedup so all sources are final.
+        # Also collect plugin prefixes from commands counter (Skill tool
+        # invocations that classified as plugin_command, e.g. commit-commands:commit).
+        for cmd_name, _source in commands:
+            if ":" in cmd_name:
+                pending_command_plugins.add(cmd_name.split(":")[0])
+        _apply_command_triggered(pending_command_plugins, skills)
 
         # Separate text_detection entries that survived dedup into skills_mentioned.
         # These are skills the user referenced in their prompt but Claude never invoked.

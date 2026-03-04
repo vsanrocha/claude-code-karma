@@ -1,68 +1,27 @@
 """
-Shared helpers for command/skill classification and parsing.
+Plugin filesystem scanning, classification, and name expansion.
 
-Centralizes logic that was duplicated across session.py, conversation_endpoints.py,
-and sessions.py to prevent drift.
+Handles detection of plugin skills/commands via the ~/.claude/plugins/cache/
+directory structure and classification of invocation names into categories.
 """
 
-import re
+import logging
+from pathlib import Path
 from typing import Optional
 
 from cachetools import TTLCache
 
-# Built-in Claude Code CLI commands that should NOT be tracked as user-authored commands.
-# These are internal to the CLI and have no corresponding user .md files.
-# Keep in sync with Claude Code CLI releases.
-BUILTIN_CLI_COMMANDS = frozenset(
-    {
-        # Core session
-        "exit",
-        "clear",
-        "compact",
-        "resume",
-        # Configuration
-        "model",
-        "config",
-        "memory",
-        "fast",
-        "vim",
-        "permissions",
-        "allowed-tools",
-        # Authentication
-        "login",
-        "logout",
-        # Context
-        "context",
-        "add-dir",
-        # Integration
-        "plugin",
-        "mcp",
-        "terminal",
-        "ide",
-        # Information
-        "help",
-        "cost",
-        "status",
-        "doctor",
-        "bug",
-        # Task management
-        "tasks",
-        # Other
-        "init",
-    }
+from .categories import InvocationCategory
+from .cli_js import (
+    _ALL_CLAUDE_CODE_COMMANDS,
+    BUILTIN_CLI_COMMANDS,
+    BUNDLED_SKILL_COMMANDS,
+    get_cli_commands,
 )
 
-# Regex for detecting real command prompts (starts with command tag)
-_COMMAND_START_RE = re.compile(r"\s*<command-(?:name|message)>")
-_COMMAND_MESSAGE_RE = re.compile(r"<command-message>(.*?)</command-message>")
-_COMMAND_NAME_RE = re.compile(r"<command-name>/?(.*?)</command-name>")
-_COMMAND_ARGS_RE = re.compile(r"<command-args>(.*?)</command-args>", re.DOTALL)
+logger = logging.getLogger(__name__)
 
-# Strips command/local-command XML tags from content for display
-_COMMAND_TAG_RE = re.compile(
-    r"<(?:command|local-command)-(?:message|name|args|caveat)>.*?</(?:command|local-command)-(?:message|name|args|caveat)>\s*",
-    re.DOTALL,
-)
+_custom_skill_cache: TTLCache[str, bool] = TTLCache(maxsize=128, ttl=60)
 
 
 def _is_custom_skill(name: str) -> bool:
@@ -73,15 +32,20 @@ def _is_custom_skill(name: str) -> bool:
       ~/.claude/skills/{name}/skill.md  (directory-based, lowercase)
       ~/.claude/skills/{name}.md        (file-based)
     """
+    if name in _custom_skill_cache:
+        return _custom_skill_cache[name]
+
     from config import settings
 
     skills_dir = settings.skills_dir
     skill_dir = skills_dir / name
-    return (
+    result = (
         (skill_dir / "SKILL.md").is_file()
         or (skill_dir / "skill.md").is_file()
         or (skills_dir / f"{name}.md").is_file()
     )
+    _custom_skill_cache[name] = result
+    return result
 
 
 # TTL caches for filesystem-dependent lookups (auto-expire after 60s so
@@ -313,174 +277,70 @@ def is_plugin_skill(name: str) -> bool:
     return _is_plugin_skill(name)
 
 
-def classify_invocation(name: str) -> str:
-    """Classify a command/skill invocation name.
+def classify_invocation(name: str, *, source: str = "") -> str:
+    """Classify a command/skill invocation name into one of 6 categories.
 
-    Returns:
-        "builtin" for built-in CLI commands (/exit, /model, etc.)
-        "skill" for plugin skills (contains ':'), custom skills (SKILL.md exists),
-                or plugin short names (matching a plugin directory)
-        "command" for user-authored commands
+    Args:
+        name: The invocation name (e.g. "commit", "superpowers:brainstorming").
+        source: Where the invocation came from. Use "skill_tool" when the name
+            was extracted from a Skill tool call — this lets plugin entries win
+            over builtin/bundled names that shadow them (e.g. "commit" is both a
+            builtin CLI alias and a plugin skill "commit-commands:commit"; when
+            invoked via the Skill tool it's always the plugin skill).
+
+    Returns one of:
+        "builtin_command"  — Pure CLI commands (/exit, /model, /clear)
+        "bundled_skill"    — Prompt-based skills shipped with Claude Code (/simplify, /batch)
+        "plugin_skill"     — Plugin skills (/oh-my-claudecode:autopilot, /frontend-design)
+        "custom_skill"     — User SKILL.md files (~/.claude/skills/)
+        "user_command"     — User .md command files (~/.claude/commands/)
+        "agent"            — Agent entries (skip from skill/command tables)
     """
+    # When invoked via the Skill tool, plugin entries take priority over
+    # builtin/bundled names that shadow them.  The Skill tool never runs
+    # builtin CLI commands — those are handled by Claude Code internally.
+    if source == "skill_tool":
+        expanded = expand_plugin_short_name(name)
+        if expanded != name and ":" in expanded:
+            return _classify_colon_name(expanded)
+        if ":" in name:
+            return _classify_colon_name(name)
+
+    # Check bundled skills first (before builtin, since these are tracked as skills)
+    if name in BUNDLED_SKILL_COMMANDS:
+        return "bundled_skill"
+    # Also check cli.js-extracted bundled skills (may include newly added ones)
+    cli = get_cli_commands()
+    if name in cli["bundled_skills"]:
+        return "bundled_skill"
     if name in BUILTIN_CLI_COMMANDS:
-        return "builtin"
+        return "builtin_command"
+    if name in cli["builtin_commands"]:
+        return "builtin_command"
     if ":" in name:
-        entry_types = _build_entry_type_map()
-        entry_type = entry_types.get(name)
-        if entry_type == "command":
-            return "command"
-        if entry_type == "agent":
-            # Agents are tracked in subagent_invocations via the Agent tool.
-            # Rare edge case: Claude may invoke an agent via the Skill tool.
-            # Return "agent" so callers can skip — these don't belong in
-            # session_skills or session_commands.
-            return "agent"
-        return "skill"
+        return _classify_colon_name(name)
     if _is_custom_skill(name):
-        return "skill"
+        return "custom_skill"
     if _is_plugin_skill(name):
-        return "skill"
-    return "command"
+        return "plugin_skill"
+    # Last resort: try expanding short-form plugin entry names.
+    # e.g. "brainstorming" → "superpowers:brainstorming" (a plugin skill entry)
+    expanded = expand_plugin_short_name(name)
+    if expanded != name and ":" in expanded:
+        return _classify_colon_name(expanded)
+    return "user_command"
 
 
-def parse_command_from_content(content: str) -> tuple[Optional[str], Optional[str]]:
-    """Parse command name and args from user prompt content with <command-message> tags.
-
-    Real command prompts from Claude Code start with either:
-      <command-name>/foo</command-name><command-message>foo</command-message>...
-    or:
-      <command-message>foo</command-message><command-name>/foo</command-name>...
-
-    Returns:
-        (command_name, args) or (None, None) if not a command prompt.
-    """
-    if "<command-message>" not in content:
-        return None, None
-
-    # Real commands start with <command-name> or <command-message> tag;
-    # code snippets have these tags mid-content
-    if not _COMMAND_START_RE.match(content):
-        return None, None
-
-    # Prefer <command-name> (clean name like "brainstorm") over
-    # <command-message> (may contain descriptive text like "The skill is running").
-    name_match = _COMMAND_NAME_RE.search(content)
-    if name_match:
-        cmd_name = name_match.group(1)
-    else:
-        cmd_match = _COMMAND_MESSAGE_RE.search(content)
-        if not cmd_match:
-            return None, None
-        cmd_name = cmd_match.group(1)
-
-    args_match = _COMMAND_ARGS_RE.search(content)
-    args = args_match.group(1).strip() if args_match and args_match.group(1).strip() else None
-
-    return cmd_name, args
-
-
-# Regex for detecting /command or /plugin:command patterns in plain text.
-# Uses negative lookahead (?!/) to reject file paths like /Users/foo, /private/tmp.
-# Also rejects matches preceded by common path/URL characters.
-_SLASH_COMMAND_RE = re.compile(r"(?:^|(?<=\s))/([a-zA-Z][\w:.-]*)(?!/)")
-
-# Common false-positive roots from file paths, URLs, and system dirs
-_PATH_ROOTS = frozenset(
-    {
-        "bin",
-        "dev",
-        "etc",
-        "home",
-        "lib",
-        "nix",
-        "opt",
-        "private",
-        "proc",
-        "root",
-        "run",
-        "sbin",
-        "snap",
-        "srv",
-        "sys",
-        "tmp",
-        "usr",
-        "var",
-        "Applications",
-        "Library",
-        "System",
-        "Users",
-        "Volumes",
-    }
-)
-
-
-def detect_slash_commands_in_text(content: str) -> list[str]:
-    """Detect /command patterns in plain-text user prompts (no XML tags).
-
-    This catches skills invoked via hooks (magic keywords) where Claude Code
-    does not wrap the command in <command-message> tags because the slash
-    command was not the primary content of the message.
-
-    Only scans the user's actual text — strips system-injected content
-    (``<system-reminder>`` blocks, ``<local-command-*>`` tags, tool output)
-    to avoid false positives from code diffs and file contents.
-
-    Returns a list of command/skill names found (without leading /).
-    """
-    # Strip system-injected content that may contain code/diffs/paths.
-    # User text is always BEFORE the first injection marker.
-    # Markers: XML tags from Claude Code, and ⏺ from compaction summaries.
-    for marker in (
-        "<system-reminder>",
-        "<local-command-",
-        "<command-name>",
-        "<command-message>",
-        "\u23fa",
-    ):
-        idx = content.find(marker)
-        if idx != -1:
-            content = content[:idx]
-
-    candidates = _SLASH_COMMAND_RE.findall(content)
-    results: list[str] = []
+def _classify_colon_name(name: str) -> str:
+    """Classify a fully-qualified 'plugin:entry' name via filesystem lookup."""
     entry_types = _build_entry_type_map()
-    for c in candidates:
-        if c in _PATH_ROOTS:
-            continue
-        if ":" in c:
-            # Validate plugin:entry names exist in filesystem.
-            # Rejects "feature:dev-feature-dev" (malformed), "omc:plan" (not real).
-            if c not in entry_types:
-                continue
-        else:
-            # Bare names (no ':') must resolve to something concrete.
-            # Reject bare plugin names that don't expand to a specific entry
-            # (e.g., "oh-my-claudecode" has 71 entries, can't pick one).
-            expanded = expand_plugin_short_name(c)
-            if expanded == c and c not in BUILTIN_CLI_COMMANDS and not _is_custom_skill(c):
-                continue
-        results.append(c)
-    return results
-
-
-def aggregate_by_name(items: dict) -> dict[str, int]:
-    """Aggregate (name, source) keyed counts to name-only counts.
-
-    Converts the tuple-keyed dicts from get_skills_used()/get_commands_used()
-    back to simple {name: total_count} format for backward compatibility.
-    """
-    result: dict[str, int] = {}
-    for key, count in items.items():
-        name = key[0] if isinstance(key, tuple) else key
-        result[name] = result.get(name, 0) + count
-    return result
-
-
-def strip_command_tags(content: str) -> str:
-    """Remove command and local-command XML tags from content for display.
-
-    Handles both <command-*> and <local-command-*> tags (e.g., <local-command-caveat>).
-    """
-    if "<command-" not in content and "<local-command-" not in content:
-        return content
-    return _COMMAND_TAG_RE.sub("", content).strip()
+    entry_type = entry_types.get(name)
+    if entry_type == "agent":
+        # Agents are tracked in subagent_invocations via the Agent tool.
+        # Rare edge case: Claude may invoke an agent via the Skill tool.
+        # Return "agent" so callers can skip — these don't belong in
+        # session_skills or session_commands.
+        return "agent"
+    if entry_type == "command":
+        return "plugin_command"
+    return "plugin_skill"

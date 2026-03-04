@@ -32,13 +32,12 @@
 	import FiltersDropdown from '$lib/components/FiltersDropdown.svelte';
 	import FiltersBottomSheet from '$lib/components/FiltersBottomSheet.svelte';
 	import ActiveFilterChips from '$lib/components/ActiveFilterChips.svelte';
-	import { renderMarkdownEffect, cleanSkillName, getPluginColorVars, getPluginChartHex, getProjectNameFromEncoded } from '$lib/utils';
+	import { renderMarkdownEffect, cleanSkillName, getPluginColorVars, getPluginChartHex, getProjectNameFromEncoded, getSkillCategoryLabel, getSkillCategoryColorVars, toSessionWithContext } from '$lib/utils';
 	import SkeletonBox from '$lib/components/skeleton/SkeletonBox.svelte';
 	import SkeletonText from '$lib/components/skeleton/SkeletonText.svelte';
 	import { SkeletonGlobalSessionCard } from '$lib/components/skeleton';
 	import type {
 		StatItem,
-		McpSessionSummary,
 		SessionWithContext,
 		SearchFilters,
 		SearchScopeSelection
@@ -98,7 +97,7 @@
 	let scopeSelection = $state<SearchScopeSelection>({ ...DEFAULT_SCOPE_SELECTION });
 	let showFiltersDropdown = $state(false);
 	let isMobile = $state(false);
-	let sourceFilter = $state<'all' | 'manual' | 'auto' | 'mentioned'>('all');
+	let sourceFilter = $state<'all' | 'manual' | 'auto' | 'mentioned' | 'command_triggered'>('all');
 	let searchTokens = $state<string[]>([]);
 	let selectedProjectFilters = $state<Set<string>>(new Set());
 
@@ -121,8 +120,9 @@
 	let manualCalls = $derived(detail?.manual_calls ?? 0);
 	let autoCalls = $derived(detail?.auto_calls ?? 0);
 	let mentionedCalls = $derived(detail?.mentioned_calls ?? 0);
-	let hasInvocationBreakdown = $derived(manualCalls > 0 || autoCalls > 0 || mentionedCalls > 0);
-	let barTotal = $derived(manualCalls + autoCalls + mentionedCalls);
+	let commandTriggeredCalls = $derived(detail?.command_triggered_calls ?? 0);
+	let hasInvocationBreakdown = $derived(manualCalls > 0 || autoCalls > 0 || mentionedCalls > 0 || commandTriggeredCalls > 0);
+	let barTotal = $derived(manualCalls + autoCalls + mentionedCalls + commandTriggeredCalls);
 
 	// Stats
 	let stats = $derived<StatItem[]>(
@@ -166,30 +166,12 @@
 	let autoPercent = $derived(
 		barTotal > 0 ? (autoCalls / barTotal) * 100 : 0
 	);
+	let commandTriggeredPercent = $derived(
+		barTotal > 0 ? (commandTriggeredCalls / barTotal) * 100 : 0
+	);
 	let mentionedPercent = $derived(
 		barTotal > 0 ? (mentionedCalls / barTotal) * 100 : 0
 	);
-
-	// Convert McpSessionSummary to SessionWithContext
-	function toSessionWithContext(s: McpSessionSummary): SessionWithContext {
-		return {
-			uuid: s.uuid,
-			slug: s.slug ?? '',
-			message_count: s.message_count,
-			start_time: s.start_time ?? '',
-			end_time: s.end_time ?? undefined,
-			duration_seconds: s.duration_seconds ?? undefined,
-			models_used: s.models_used,
-			subagent_count: s.subagent_count,
-			has_todos: false,
-			initial_prompt: s.initial_prompt ?? undefined,
-			git_branches: s.git_branches,
-			session_titles: s.session_titles,
-			project_encoded_name: s.project_encoded_name ?? undefined,
-			project_path: s.project_encoded_name ?? '',
-			project_name: s.project_display_name || getProjectNameFromEncoded(s.project_encoded_name ?? '')
-		};
-	}
 
 	// Sessions as SessionWithContext for filtering
 	let sessionsAsContext = $derived<SessionWithContext[]>(
@@ -229,7 +211,7 @@
 	// Restore filters from URL params
 	function restoreFiltersFromUrl(params: URLSearchParams) {
 		const sourceParam = params.get('source');
-		if (sourceParam === 'manual' || sourceParam === 'auto' || sourceParam === 'mentioned') {
+		if (sourceParam === 'manual' || sourceParam === 'auto' || sourceParam === 'mentioned' || sourceParam === 'command_triggered') {
 			sourceFilter = sourceParam;
 		} else {
 			sourceFilter = 'all';
@@ -355,6 +337,9 @@
 				}
 				if (sourceFilter === 'auto') {
 					return sources.includes('skill_tool');
+				}
+				if (sourceFilter === 'command_triggered') {
+					return sources.includes('command_triggered');
 				}
 				// mentioned: text_detection only (no slash_command or skill_tool)
 				return sources.includes('text_detection') && !sources.includes('slash_command') && !sources.includes('skill_tool');
@@ -556,6 +541,15 @@
 			]}
 		>
 			{#snippet badges()}
+				{#if detail.category}
+					{@const catColors = getSkillCategoryColorVars(detail.category)}
+					<span
+						class="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full"
+						style="color: {catColors.color}; background-color: {catColors.subtle};"
+					>
+						{getSkillCategoryLabel(detail.category)}
+					</span>
+				{/if}
 				{#if detail.is_plugin && detail.plugin}
 					<a
 						href="/plugins/{encodeURIComponent(detail.plugin.split('@')[0])}"
@@ -594,6 +588,13 @@
 										title="Manual: {manualCalls}"
 									></div>
 								{/if}
+								{#if commandTriggeredPercent > 0}
+									<div
+										class="bg-amber-500 transition-all duration-300"
+										style="width: {commandTriggeredPercent}%"
+										title="Command-triggered: {commandTriggeredCalls}"
+									></div>
+								{/if}
 								{#if autoPercent > 0}
 									<div
 										class="bg-purple-500 transition-all duration-300"
@@ -603,7 +604,7 @@
 								{/if}
 								{#if mentionedPercent > 0}
 									<div
-										class="bg-amber-500/50 transition-all duration-300"
+										class="bg-gray-500/50 transition-all duration-300"
 										style="width: {mentionedPercent}%"
 										title="Mentioned (not invoked): {mentionedCalls}"
 									></div>
@@ -618,9 +619,15 @@
 									<span class="w-2 h-2 rounded-full bg-purple-500"></span>
 									Auto: {autoCalls}
 								</span>
+								{#if commandTriggeredCalls > 0}
+									<span class="flex items-center gap-1">
+										<span class="w-2 h-2 rounded-full bg-amber-500"></span>
+										Command-triggered: {commandTriggeredCalls}
+									</span>
+								{/if}
 								{#if mentionedCalls > 0}
 									<span class="flex items-center gap-1">
-										<span class="w-2 h-2 rounded-full bg-amber-500/50"></span>
+										<span class="w-2 h-2 rounded-full bg-gray-500/50"></span>
 										Mentioned <span class="opacity-60">(Not invoked)</span>: {mentionedCalls}
 									</span>
 								{/if}
@@ -658,23 +665,8 @@
 
 		<!-- Overview Tab -->
 		{#if activeTab === 'overview'}
-			<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-				<!-- Context Split Card -->
-				<div
-					class="bg-[var(--bg-base)] border border-[var(--border)] rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow"
-				>
-					<ContextSplitCard
-						mainCalls={detail.main_calls}
-						subagentCalls={detail.subagent_calls}
-						totalCalls={detail.calls}
-						firstUsed={detail.first_used}
-						lastUsed={detail.last_used}
-						sessions={detail.sessions}
-						accentColor={pluginColors.color}
-					/>
-				</div>
-
-				<!-- Usage Trend -->
+			<div class="space-y-6">
+				<!-- Usage Trend (full width) -->
 				{#if detail.trend && detail.trend.length > 0}
 					<div
 						class="bg-[var(--bg-base)] border border-[var(--border)] rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow"
@@ -689,6 +681,122 @@
 						<McpTrendChart trend={detail.trend} accentColor={chartAccentHex} />
 					</div>
 				{/if}
+
+				<!-- Context Split + Invocation Breakdown (side by side) -->
+				<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+					<!-- Context Split Card -->
+					<div
+						class="bg-[var(--bg-base)] border border-[var(--border)] rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow"
+					>
+						<ContextSplitCard
+							mainCalls={detail.main_calls}
+							subagentCalls={detail.subagent_calls}
+							totalCalls={detail.calls}
+							firstUsed={detail.first_used}
+							lastUsed={detail.last_used}
+							sessions={detail.sessions}
+							accentColor={pluginColors.color}
+						/>
+					</div>
+
+					<!-- Invocation Breakdown Card -->
+					{#if hasInvocationBreakdown}
+						<div
+							class="bg-[var(--bg-base)] border border-[var(--border)] rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow"
+						>
+							<div class="flex items-center gap-2 mb-6">
+								<Zap size={18} class="text-[var(--text-muted)]" />
+								<h3 class="text-lg font-bold text-[var(--text-primary)]">Invocation Breakdown</h3>
+							</div>
+
+							<!-- Stacked bar -->
+							<div class="mb-6">
+								<div class="flex h-5 rounded-full overflow-hidden bg-[var(--bg-muted)] shadow-inner">
+									{#if manualPercent > 0}
+										<div
+											class="bg-blue-500 transition-all duration-300 ease-out flex items-center justify-center text-[10px] font-bold text-white"
+											style="width: {manualPercent}%"
+											title="Manual: {manualCalls}"
+										>
+											{#if manualPercent > 15}{Math.round(manualPercent)}%{/if}
+										</div>
+									{/if}
+									{#if commandTriggeredPercent > 0}
+										<div
+											class="bg-amber-500 transition-all duration-300 ease-out flex items-center justify-center text-[10px] font-bold text-white"
+											style="width: {commandTriggeredPercent}%"
+											title="By Command: {commandTriggeredCalls}"
+										>
+											{#if commandTriggeredPercent > 15}{Math.round(commandTriggeredPercent)}%{/if}
+										</div>
+									{/if}
+									{#if autoPercent > 0}
+										<div
+											class="bg-purple-500 transition-all duration-300 ease-out flex items-center justify-center text-[10px] font-bold text-white"
+											style="width: {autoPercent}%"
+											title="Auto: {autoCalls}"
+										>
+											{#if autoPercent > 15}{Math.round(autoPercent)}%{/if}
+										</div>
+									{/if}
+									{#if mentionedPercent > 0}
+										<div
+											class="bg-gray-500/50 transition-all duration-300 ease-out flex items-center justify-center text-[10px] font-bold text-white"
+											style="width: {mentionedPercent}%"
+											title="Mentioned (not invoked): {mentionedCalls}"
+										>
+											{#if mentionedPercent > 15}{Math.round(mentionedPercent)}%{/if}
+										</div>
+									{/if}
+								</div>
+							</div>
+
+							<!-- Legend grid -->
+							<div class="grid grid-cols-2 gap-3 text-xs">
+								<div class="flex items-center gap-2 text-[var(--text-secondary)] bg-[var(--bg-subtle)] rounded-lg p-2.5">
+									<span class="w-3 h-3 rounded-full bg-blue-500"></span>
+									<div class="flex-1 min-w-0">
+										<div class="font-medium">Manual</div>
+										<div class="text-[var(--text-primary)] font-semibold tabular-nums">
+											{manualCalls.toLocaleString()} calls
+										</div>
+									</div>
+								</div>
+								<div class="flex items-center gap-2 text-[var(--text-secondary)] bg-[var(--bg-subtle)] rounded-lg p-2.5">
+									<span class="w-3 h-3 rounded-full bg-purple-500"></span>
+									<div class="flex-1 min-w-0">
+										<div class="font-medium">Auto</div>
+										<div class="text-[var(--text-primary)] font-semibold tabular-nums">
+											{autoCalls.toLocaleString()} calls
+										</div>
+									</div>
+								</div>
+								{#if commandTriggeredCalls > 0}
+									<div class="flex items-center gap-2 text-[var(--text-secondary)] bg-[var(--bg-subtle)] rounded-lg p-2.5">
+										<span class="w-3 h-3 rounded-full bg-amber-500"></span>
+										<div class="flex-1 min-w-0">
+											<div class="font-medium">By Command</div>
+											<div class="text-[var(--text-primary)] font-semibold tabular-nums">
+												{commandTriggeredCalls.toLocaleString()} calls
+											</div>
+										</div>
+									</div>
+								{/if}
+								{#if mentionedCalls > 0}
+									<div class="flex items-center gap-2 text-[var(--text-secondary)] bg-[var(--bg-subtle)] rounded-lg p-2.5">
+										<span class="w-3 h-3 rounded-full bg-gray-500/50"></span>
+										<div class="flex-1 min-w-0">
+											<div class="font-medium">Mentioned</div>
+											<div class="text-[var(--text-primary)] font-semibold tabular-nums">
+												{mentionedCalls.toLocaleString()} calls
+											</div>
+										</div>
+									</div>
+								{/if}
+							</div>
+						</div>
+					{/if}
+				</div>
 			</div>
 
 		<!-- History Tab -->
@@ -761,6 +869,17 @@
 						>
 							Auto <span class="ml-0.5 opacity-70">{autoCalls}</span>
 						</button>
+						{#if commandTriggeredCalls > 0}
+							<button
+								onclick={() => (sourceFilter = sourceFilter === 'command_triggered' ? 'all' : 'command_triggered')}
+								class="px-3 py-1 text-xs font-medium rounded-full transition-all {sourceFilter === 'command_triggered'
+									? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+									: 'bg-[var(--bg-subtle)] text-[var(--text-muted)] border border-transparent hover:border-[var(--border)] hover:text-[var(--text-secondary)]'}"
+								aria-pressed={sourceFilter === 'command_triggered'}
+							>
+								Cmd-triggered <span class="ml-0.5 opacity-70">{commandTriggeredCalls}</span>
+							</button>
+						{/if}
 						{#if mentionedCalls > 0}
 							<button
 								onclick={() => (sourceFilter = sourceFilter === 'mentioned' ? 'all' : 'mentioned')}

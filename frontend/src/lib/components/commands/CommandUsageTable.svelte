@@ -1,38 +1,34 @@
 <script lang="ts">
-	import type { SkillUsage } from '$lib/api-types';
-	import { getSkillColorVars, cleanSkillName } from '$lib/utils';
+	import type { CommandUsage } from '$lib/api-types';
+	import { getCommandCategoryColorVars, getCommandCategoryLabel } from '$lib/utils';
 	import UsageTable from '$lib/components/shared/UsageTable.svelte';
 	import type { UsageColumn } from '$lib/components/shared/UsageTable.svelte';
 
 	interface Props {
-		skills: SkillUsage[];
+		commands: CommandUsage[];
 	}
 
-	let { skills }: Props = $props();
+	let { commands }: Props = $props();
 
 	// Sort state
-	let sortKey = $state<'name' | 'type' | 'plugin' | 'uses' | 'sessions' | 'last'>('uses');
+	let sortKey = $state<'name' | 'category' | 'uses' | 'sessions' | 'last'>('uses');
 	let sortDir = $state<'asc' | 'desc'>('desc');
 
 	const columns: UsageColumn[] = [
-		{ key: 'name', label: 'Skill' },
-		{ key: 'type', label: 'Type' },
-		{ key: 'plugin', label: 'Plugin' }
+		{ key: 'name', label: 'Command' },
+		{ key: 'category', label: 'Category' }
 	];
 
-	let sortedSkills = $derived.by(() => {
-		const sorted = [...skills];
+	let sortedCommands = $derived.by(() => {
+		const sorted = [...commands];
 		sorted.sort((a, b) => {
 			let cmp = 0;
 			switch (sortKey) {
 				case 'name':
 					cmp = a.name.localeCompare(b.name);
 					break;
-				case 'type':
-					cmp = Number(a.is_plugin) - Number(b.is_plugin);
-					break;
-				case 'plugin':
-					cmp = (a.plugin ?? '').localeCompare(b.plugin ?? '');
+				case 'category':
+					cmp = (a.category ?? '').localeCompare(b.category ?? '');
 					break;
 				case 'uses':
 					cmp = a.count - b.count;
@@ -63,37 +59,35 @@
 </script>
 
 <UsageTable
-	items={sortedSkills}
-	getKey={(s) => s.name}
+	items={sortedCommands}
+	getKey={(c) => c.name}
 	{columns}
 	{sortKey}
 	{sortDir}
 	onToggleSort={toggleSort}
 >
-	{#snippet customCells(skill)}
-		{@const skillColor = getSkillColorVars(skill.name, skill.is_plugin, skill.plugin)}
+	{#snippet customCells(command)}
+		{@const catColors = getCommandCategoryColorVars(command.category ?? 'user_command')}
 		<td class="px-4 py-3">
 			<div class="flex items-center gap-2.5">
 				<span
 					class="w-2 h-2 rounded-full flex-shrink-0"
-					style="background-color: {skillColor.color};"
+					style="background-color: {catColors.color};"
 				></span>
 				<a
-					href="/skills/{encodeURIComponent(skill.name)}"
+					href="/commands/{encodeURIComponent(command.name)}"
 					class="font-medium text-[var(--text-primary)] hover:text-[var(--accent)] transition-colors"
 				>
-					{cleanSkillName(skill.name, skill.is_plugin)}
+					/{command.name}
 				</a>
 			</div>
 		</td>
 		<td class="px-4 py-3">
-			<span class="text-[var(--text-secondary)]">
-				{skill.is_plugin ? 'Plugin' : 'Custom'}
-			</span>
-		</td>
-		<td class="px-4 py-3">
-			<span class="text-[var(--text-muted)]">
-				{skill.plugin ?? '—'}
+			<span
+				class="inline-flex items-center px-2 py-0.5 text-[10px] font-medium rounded-full"
+				style="color: {catColors.color}; background-color: {catColors.subtle};"
+			>
+				{getCommandCategoryLabel(command.category ?? 'user_command')}
 			</span>
 		</td>
 	{/snippet}

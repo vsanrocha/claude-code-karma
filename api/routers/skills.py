@@ -23,7 +23,12 @@ models_path = api_path.parent.parent
 sys.path.insert(0, str(api_path))
 sys.path.insert(0, str(models_path))
 
-from command_helpers import is_plugin_skill
+from command_helpers import (
+    classify_invocation,
+    get_bundled_skill_prompt,
+    get_command_description,
+    is_plugin_skill,
+)
 from config import Settings, settings
 from http_caching import cacheable
 from models import Project
@@ -424,6 +429,8 @@ def get_skill_usage(
                             "plugin": plugin_name,
                             "last_used": row.get("last_used"),
                             "session_count": row.get("session_count", 0),
+                            "category": classify_invocation(skill_name),
+                            "description": get_command_description(skill_name),
                         }
                     )
                 return results
@@ -483,6 +490,8 @@ def get_skill_usage(
                 "plugin": plugin_name,
                 "last_used": None,
                 "session_count": 0,
+                "category": classify_invocation(skill_name),
+                "description": get_command_description(skill_name),
             }
         )
 
@@ -634,12 +643,14 @@ async def get_skill_detail(
         is_plugin=skill_info.is_plugin if skill_info else is_plugin_skill(skill_name),
         plugin=skill_info.plugin if skill_info else None,
         file_path=skill_info.file_path if skill_info else None,
+        category=classify_invocation(skill_name),
         calls=usage_data["total_calls"] if usage_data else 0,
         main_calls=usage_data["main_calls"] if usage_data else 0,
         subagent_calls=usage_data["subagent_calls"] if usage_data else 0,
         manual_calls=usage_data["manual_calls"] if usage_data else 0,
         auto_calls=usage_data["auto_calls"] if usage_data else 0,
         mentioned_calls=usage_data.get("mentioned_calls", 0) if usage_data else 0,
+        command_triggered_calls=usage_data.get("command_triggered_calls", 0) if usage_data else 0,
         mention_session_count=usage_data.get("mention_session_count", 0) if usage_data else 0,
         session_count=usage_data["session_count"] if usage_data else 0,
         first_used=usage_data["first_used"] if usage_data else None,
@@ -916,6 +927,18 @@ async def _resolve_skill_info(skill_name: str, config: Settings) -> SkillInfo:
                         break
 
             if not skill_file:
+                # Fallback for bundled skills (no .md file, description from cli.js)
+                kind = classify_invocation(skill_name)
+                if kind == "bundled_skill":
+                    desc = get_command_description(skill_name)
+                    return SkillInfo(
+                        name=skill_name,
+                        description=desc,
+                        content=get_bundled_skill_prompt(skill_name),
+                        is_plugin=False,
+                        plugin=None,
+                        file_path=None,
+                    )
                 raise HTTPException(
                     status_code=404,
                     detail=f"Skill '{skill_name}' not found in ~/.claude/commands/, ~/.claude/skills/, or plugins cache",

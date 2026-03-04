@@ -620,13 +620,51 @@ class CommandUsage(BaseModel):
     name: str = Field(..., description="Command name (e.g., 'commit', 'run-tests')")
     count: int = Field(..., description="Number of times the command was invoked")
     source: str = Field(
-        "unknown", description="Source: 'builtin', 'plugin', 'project', 'user', or 'unknown'"
+        "unknown",
+        description="Legacy source field. Prefer 'category' for classification: "
+        "'builtin_command', 'bundled_skill', 'plugin_skill', 'plugin_command', "
+        "'custom_skill', 'user_command'",
     )
     plugin: Optional[str] = Field(None, description="Plugin name if source == 'plugin'")
     invocation_source: str = Field(
         "slash_command",
         description="How the command was invoked: 'slash_command', 'skill_tool', or 'text_detection'",
     )
+    category: Optional[str] = Field(
+        None,
+        description="Classification category: 'builtin_command', 'bundled_skill', "
+        "'plugin_skill', 'custom_skill', 'user_command'",
+    )
+    description: Optional[str] = Field(
+        None, description="Command description from cli.js (for builtins/bundled)"
+    )
+    last_used: Optional[str] = Field(None, description="Last usage date (ISO)")
+    session_count: Optional[int] = Field(None, description="Number of sessions using this command")
+
+
+class CommandDetailResponse(BaseModel):
+    """Detailed command info with usage stats, trend, and session list."""
+
+    name: str = Field(..., description="Command name")
+    description: Optional[str] = Field(None, description="Command description")
+    category: str = Field("user_command", description="Classification category")
+    content: Optional[str] = Field(None, description="Full command content (markdown)")
+    is_plugin: bool = Field(False, description="True if this is a plugin command")
+    plugin: Optional[str] = Field(None, description="Plugin name if is_plugin")
+    file_path: Optional[str] = Field(None, description="Path to the command file")
+    calls: int = Field(0, description="Total invocations")
+    main_calls: int = Field(0, description="Calls from main sessions")
+    subagent_calls: int = Field(0, description="Calls from subagents")
+    manual_calls: int = Field(0, description="Calls via slash command (user-initiated)")
+    auto_calls: int = Field(0, description="Calls via skill tool (auto-invoked by Claude)")
+    session_count: int = Field(0, description="Distinct sessions using this command")
+    first_used: Optional[str] = Field(None, description="First usage date (ISO)")
+    last_used: Optional[str] = Field(None, description="Last usage date (ISO)")
+    trend: list["SkillTrendItem"] = Field(default_factory=list, description="Daily usage trend")
+    sessions: list[SessionSummary] = Field(
+        default_factory=list, description="Sessions using this command"
+    )
+    sessions_total: int = Field(0, description="Total session count (before pagination)")
 
 
 class SkillInfo(BaseModel):
@@ -667,12 +705,14 @@ class SkillDetailResponse(BaseModel):
     is_plugin: bool = Field(False, description="True if this is a plugin skill")
     plugin: Optional[str] = Field(None, description="Plugin name if is_plugin")
     file_path: Optional[str] = Field(None, description="Path to the skill file")
+    category: Optional[str] = Field(None, description="Invocation category (builtin_command, bundled_skill, plugin_skill, user_skill, unknown)")
     calls: int = Field(0, description="Total invocations")
     main_calls: int = Field(0, description="Calls from main sessions")
     subagent_calls: int = Field(0, description="Calls from subagents")
     manual_calls: int = Field(0, description="Calls via slash command (user-initiated)")
     auto_calls: int = Field(0, description="Calls via skill tool (auto-invoked by Claude)")
     mentioned_calls: int = Field(0, description="Times mentioned in user prompts but not invoked")
+    command_triggered_calls: int = Field(0, description="Calls triggered by a plugin command")
     mention_session_count: int = Field(
         0, description="Sessions where skill was only mentioned, not invoked"
     )
