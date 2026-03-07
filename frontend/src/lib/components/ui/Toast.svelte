@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { toasts, dismissToast } from '$lib/stores/toast';
+	import { toasts, dismissToast } from '$lib/stores/toast.svelte';
 	import { X, CheckCircle2, AlertCircle, Info } from 'lucide-svelte';
 </script>
 
