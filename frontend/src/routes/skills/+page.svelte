@@ -51,6 +51,9 @@
 		(initParam('view', 'groups') as 'groups' | 'table' | 'analytics' | 'members')
 	);
 
+	// Reset sub-filter when entering members view
+	$effect(() => { if (activeView === 'members') selectedFilter = 'all'; });
+
 	// Filter state — initialized from URL
 	let searchQuery = $state(initParam('search', ''));
 	let selectedFilter = $state<'all' | 'bundled' | 'plugin' | 'custom' | 'inherited'>(
