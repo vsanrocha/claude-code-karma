@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { API_BASE } from '$lib/config';
-	import { addToast } from '$lib/stores/toast';
+	import { addToast } from '$lib/stores/toast.svelte';
 	import WorkflowEditor from '$lib/components/workflows/WorkflowEditor.svelte';
 	import type { WorkflowStep, WorkflowInput } from '$lib/api-types';
 	import type { Node, Edge } from '@xyflow/svelte';

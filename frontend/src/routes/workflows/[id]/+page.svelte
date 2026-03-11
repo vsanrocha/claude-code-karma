@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { API_BASE } from '$lib/config';
-	import { addToast } from '$lib/stores/toast';
+	import { addToast } from '$lib/stores/toast.svelte';
 	import WorkflowEditor from '$lib/components/workflows/WorkflowEditor.svelte';
 	import RunWorkflowModal from '$lib/components/workflows/RunWorkflowModal.svelte';
 	import Modal from '$lib/components/ui/Modal.svelte';
@@ -112,11 +112,7 @@
 </div>
 
 <!-- Run modal with input form (#3) -->
-<RunWorkflowModal
-	bind:open={showRunModal}
-	inputs={workflow.inputs}
-	onrun={executeRun}
-/>
+<RunWorkflowModal bind:open={showRunModal} inputs={workflow.inputs} onrun={executeRun} />
 
 <!-- Delete confirmation (#5) -->
 <Modal
