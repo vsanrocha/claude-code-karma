@@ -2,6 +2,7 @@
 import click
 
 from .search import search
+from .sessions import sessions
 
 
 @click.group()
@@ -11,3 +12,4 @@ def cli():
 
 
 cli.add_command(search)
+cli.add_command(sessions)
