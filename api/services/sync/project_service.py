@@ -1,8 +1,11 @@
 """ProjectService — project sharing + subscription management orchestration."""
 from __future__ import annotations
 
+import logging
 import sqlite3
 from typing import TYPE_CHECKING
+
+logger = logging.getLogger(__name__)
 
 from domain.project import SharedProject, derive_folder_suffix
 from domain.subscription import Subscription, SyncDirection
@@ -82,6 +85,9 @@ class ProjectService:
                 team.leader_member_tag, project.folder_suffix,
             )
 
+        # Publish leader's updated project list to metadata folder
+        self._publish_member_metadata(conn, team_name, team.leader_member_tag)
+
         self.events.log(conn, SyncEvent(
             event_type=SyncEventType.project_shared,
             team_name=team_name,
@@ -122,6 +128,9 @@ class ProjectService:
         tags = [m.member_tag for m in members]
         await self.folders.cleanup_project_folders(removed.folder_suffix, tags)
 
+        # Publish leader's updated project list to metadata folder
+        self._publish_member_metadata(conn, team_name, team.leader_member_tag)
+
         self.events.log(conn, SyncEvent(
             event_type=SyncEventType.project_removed,
             team_name=team_name,
@@ -153,6 +162,8 @@ class ProjectService:
         self.subs.save(conn, accepted)
         await self._apply_sync_direction(conn, accepted)
 
+        self._publish_member_metadata(conn, team_name, member_tag)
+
         self.events.log(conn, SyncEvent(
             event_type=SyncEventType.subscription_accepted,
             team_name=team_name,
@@ -177,6 +188,7 @@ class ProjectService:
 
         paused = sub.pause()
         self.subs.save(conn, paused)
+        self._publish_member_metadata(conn, team_name, member_tag)
 
         self.events.log(conn, SyncEvent(
             event_type=SyncEventType.subscription_paused,
@@ -202,6 +214,7 @@ class ProjectService:
         resumed = sub.resume()
         self.subs.save(conn, resumed)
         await self._apply_sync_direction(conn, resumed)
+        self._publish_member_metadata(conn, team_name, member_tag)
 
         self.events.log(conn, SyncEvent(
             event_type=SyncEventType.subscription_resumed,
@@ -226,6 +239,7 @@ class ProjectService:
 
         declined = sub.decline()
         self.subs.save(conn, declined)
+        self._publish_member_metadata(conn, team_name, member_tag)
 
         self.events.log(conn, SyncEvent(
             event_type=SyncEventType.subscription_declined,
@@ -269,6 +283,8 @@ class ProjectService:
             elif not was_sending and now_sending:
                 await self.folders.ensure_outbox_folder(member_tag, project.folder_suffix)
 
+        self._publish_member_metadata(conn, team_name, member_tag)
+
         self.events.log(conn, SyncEvent(
             event_type=SyncEventType.direction_changed,
             team_name=team_name,
@@ -281,6 +297,46 @@ class ProjectService:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _publish_member_metadata(
+        self, conn: sqlite3.Connection, team_name: str, member_tag: str,
+    ) -> None:
+        """Publish a member's project list and subscriptions to the metadata folder.
+
+        Queries current projects and subscriptions from DB, then writes them
+        to the member's state file via read-merge-write (preserving basic fields).
+        Best-effort: filesystem errors are logged but do not abort the caller.
+        """
+        try:
+            projects = self.projects.list_for_team(conn, team_name)
+            projects_data = [
+                {
+                    "git_identity": p.git_identity,
+                    "folder_suffix": p.folder_suffix,
+                    "encoded_name": p.encoded_name,
+                }
+                for p in projects
+                if p.status.value == "shared"
+            ]
+            subs = self.subs.list_for_member(conn, member_tag)
+            subs_data = {
+                s.project_git_identity: {
+                    "status": s.status.value,
+                    "direction": s.direction.value,
+                }
+                for s in subs
+                if s.team_name == team_name
+            }
+            self.metadata.write_member_state(
+                team_name, member_tag,
+                projects=projects_data,
+                subscriptions=subs_data,
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to publish metadata for member '%s' in team '%s': %s",
+                member_tag, team_name, e,
+            )
 
     async def _apply_sync_direction(self, conn: sqlite3.Connection, sub: Subscription) -> None:
         """Create Syncthing folders based on subscription direction."""

@@ -7,7 +7,7 @@ import sqlite3
 from typing import TYPE_CHECKING
 
 from domain.member import Member, MemberStatus
-from domain.project import SharedProjectStatus
+from domain.project import SharedProject, SharedProjectStatus, derive_folder_suffix
 from domain.subscription import Subscription, SubscriptionStatus, SyncDirection
 from domain.team import Team
 from domain.events import SyncEvent, SyncEventType
@@ -192,17 +192,61 @@ class ReconciliationService:
 
         # Discover/remove projects from leader's metadata state
         leader_state = states.get(team.leader_member_tag, {})
-        leader_projects = {p["git_identity"] for p in leader_state.get("projects", [])}
-        local_projects = self.projects.list_for_team(conn, team.name)
 
+        # Guard: skip project sync if leader hasn't published projects yet.
+        # Distinguishes "no projects key" (not synced) from "projects: []" (no projects).
+        if "projects" not in leader_state:
+            logger.debug(
+                "phase_metadata: skipping project sync for team '%s' — "
+                "leader '%s' has not yet published projects key",
+                team.name, team.leader_member_tag,
+            )
+            return
+
+        leader_projects_raw = leader_state["projects"]
+        leader_projects = {p["git_identity"] for p in leader_projects_raw}
+        local_projects = self.projects.list_for_team(conn, team.name)
+        local_git_identities = {lp.git_identity for lp in local_projects}
+
+        # Remove projects no longer in leader's list
         for lp in local_projects:
             if lp.git_identity not in leader_projects and lp.status == SharedProjectStatus.SHARED:
-                # Project removed by leader — decline all non-declined subs
                 removed = lp.remove()
                 self.projects.save(conn, removed)
                 for sub in self.subs.list_for_project(conn, team.name, lp.git_identity):
                     if sub.status != SubscriptionStatus.DECLINED:
                         self.subs.save(conn, sub.decline())
+
+        # Discover new projects from leader's metadata
+        for proj_data in leader_projects_raw:
+            git_id = proj_data.get("git_identity")
+            if not git_id:
+                logger.warning(
+                    "phase_metadata: skipping malformed project entry (no git_identity) in team '%s'",
+                    team.name,
+                )
+                continue
+            if git_id in local_git_identities:
+                continue
+            # Create SharedProject locally
+            project = SharedProject(
+                team_name=team.name,
+                git_identity=git_id,
+                encoded_name=proj_data.get("encoded_name"),
+                folder_suffix=proj_data.get("folder_suffix", derive_folder_suffix(git_id)),
+            )
+            self.projects.save(conn, project)
+            # Create OFFERED subscription for self
+            sub = Subscription(
+                member_tag=self.my_member_tag,
+                team_name=team.name,
+                project_git_identity=git_id,
+            )
+            self.subs.save(conn, sub)
+            logger.info(
+                "phase_metadata: discovered project '%s' in team '%s' — created OFFERED subscription",
+                git_id, team.name,
+            )
 
     async def phase_mesh_pair(self, conn: sqlite3.Connection, team) -> None:
         """Phase 2: Pair with undiscovered active team members."""

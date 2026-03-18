@@ -64,23 +64,80 @@ class TestWriteTeamState:
         assert data["device_id"] == "DEV-L"
 
 
-class TestWriteOwnState:
-    def test_writes_projects_and_subscriptions(self, service, member):
-        projects = [SharedProject(
-            team_name="karma-team", git_identity="o/r", folder_suffix="o-r",
-        )]
-        subs = [Subscription(
-            member_tag="ayush.laptop", team_name="karma-team",
-            project_git_identity="o/r",
-            status=SubscriptionStatus.ACCEPTED, direction=SyncDirection.BOTH,
-        )]
-        service.write_own_state("karma-team", "ayush.laptop", projects, subs)
+class TestWriteMemberState:
+    def test_writes_basic_fields(self, service):
+        service.write_member_state(
+            "karma-team", "ayush.laptop",
+            device_id="DEV-A", user_id="ayush", machine_tag="laptop", status="active",
+        )
         state_file = service._team_dir("karma-team") / "members" / "ayush.laptop.json"
         data = json.loads(state_file.read_text())
-        assert len(data["projects"]) == 1
+        assert data["member_tag"] == "ayush.laptop"
+        assert data["device_id"] == "DEV-A"
+        assert data["status"] == "active"
+        assert "updated_at" in data
+
+    def test_writes_projects_and_subscriptions(self, service):
+        service.write_member_state(
+            "karma-team", "ayush.laptop",
+            projects=[{"git_identity": "o/r", "folder_suffix": "o-r"}],
+            subscriptions={"o/r": {"status": "accepted", "direction": "both"}},
+        )
+        state_file = service._team_dir("karma-team") / "members" / "ayush.laptop.json"
+        data = json.loads(state_file.read_text())
         assert data["projects"][0]["git_identity"] == "o/r"
         assert data["subscriptions"]["o/r"]["status"] == "accepted"
+
+    def test_read_merge_write_preserves_existing_fields(self, service):
+        """Key test: basic info write followed by project write preserves both."""
+        # Step 1: write basic info (as write_team_state does)
+        service.write_member_state(
+            "karma-team", "ayush.laptop",
+            device_id="DEV-A", user_id="ayush", machine_tag="laptop", status="active",
+        )
+        # Step 2: write projects/subscriptions (as _publish_member_metadata does)
+        service.write_member_state(
+            "karma-team", "ayush.laptop",
+            projects=[{"git_identity": "o/r", "folder_suffix": "o-r"}],
+            subscriptions={"o/r": {"status": "accepted", "direction": "both"}},
+        )
+        state_file = service._team_dir("karma-team") / "members" / "ayush.laptop.json"
+        data = json.loads(state_file.read_text())
+        # Both basic AND enriched fields must coexist
+        assert data["device_id"] == "DEV-A"
+        assert data["user_id"] == "ayush"
+        assert data["status"] == "active"
+        assert data["projects"][0]["git_identity"] == "o/r"
         assert data["subscriptions"]["o/r"]["direction"] == "both"
+
+    def test_reverse_order_also_preserves(self, service):
+        """Projects written first, basic info written second — both preserved."""
+        service.write_member_state(
+            "karma-team", "ayush.laptop",
+            projects=[{"git_identity": "o/r", "folder_suffix": "o-r"}],
+        )
+        service.write_member_state(
+            "karma-team", "ayush.laptop",
+            device_id="DEV-A", status="active",
+        )
+        state_file = service._team_dir("karma-team") / "members" / "ayush.laptop.json"
+        data = json.loads(state_file.read_text())
+        assert data["device_id"] == "DEV-A"
+        assert data["projects"][0]["git_identity"] == "o/r"
+
+    def test_write_team_state_preserves_enriched_fields(self, service, team, leader):
+        """write_team_state() must not wipe projects/subscriptions."""
+        # Pre-enrich leader's state file
+        service.write_member_state(
+            "karma-team", "jayant.macbook",
+            device_id="DEV-L", projects=[{"git_identity": "o/r", "folder_suffix": "o-r"}],
+        )
+        # Now call write_team_state (which re-writes basic fields for all members)
+        service.write_team_state(team, [leader])
+        state_file = service._team_dir("karma-team") / "members" / "jayant.macbook.json"
+        data = json.loads(state_file.read_text())
+        assert data["device_id"] == "DEV-L"
+        assert data["projects"][0]["git_identity"] == "o/r"
 
 
 class TestWriteRemovalSignal:

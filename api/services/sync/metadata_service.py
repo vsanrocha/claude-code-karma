@@ -2,18 +2,21 @@
 
 Each team has a metadata folder (karma-meta--{team}). Members write their
 own state files. Leader writes team.json and removal signals.
+
+Member state files use a unified schema — all fields coexist:
+  {member_tag, device_id, user_id, machine_tag, status, projects, subscriptions, updated_at}
+write_member_state() uses read-merge-write to preserve fields across callers.
 """
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from domain.member import Member
-    from domain.project import SharedProject
-    from domain.subscription import Subscription
     from domain.team import Team
 
 
@@ -36,6 +39,10 @@ class MetadataService:
         _validate_path_component(team_name, "team_name")
         return self.meta_base / f"karma-meta--{team_name}"
 
+    # ------------------------------------------------------------------
+    # Read
+    # ------------------------------------------------------------------
+
     def read_team_json(self, team_name: str) -> dict | None:
         """Read team.json from the metadata folder. Returns None if not found."""
         team_dir = self._team_dir(team_name)
@@ -46,87 +53,6 @@ class MetadataService:
             return json.loads(team_json_path.read_text())
         except (json.JSONDecodeError, OSError):
             return None
-
-    def write_team_state(self, team: "Team", members: list["Member"]) -> None:
-        """Write team.json + member state files to metadata folder."""
-        team_dir = self._team_dir(team.name)
-        team_dir.mkdir(parents=True, exist_ok=True)
-        (team_dir / "members").mkdir(exist_ok=True)
-        (team_dir / "removed").mkdir(exist_ok=True)
-
-        # Write team.json
-        team_data = {
-            "name": team.name,
-            "created_by": team.leader_member_tag,
-            "leader_device_id": team.leader_device_id,
-            "created_at": team.created_at.isoformat(),
-        }
-        (team_dir / "team.json").write_text(json.dumps(team_data, indent=2))
-
-        # Write member state files
-        for member in members:
-            _validate_path_component(member.member_tag, "member_tag")
-            member_data = {
-                "member_tag": member.member_tag,
-                "device_id": member.device_id,
-                "user_id": member.user_id,
-                "machine_tag": member.machine_tag,
-                "status": member.status.value,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            }
-            member_file = team_dir / "members" / f"{member.member_tag}.json"
-            member_file.write_text(json.dumps(member_data, indent=2))
-
-    def write_own_state(
-        self,
-        team_name: str,
-        member_tag: str,
-        projects: list["SharedProject"],
-        subscriptions: list["Subscription"],
-    ) -> None:
-        """Write own member state with projects and subscriptions."""
-        team_dir = self._team_dir(team_name)
-        (team_dir / "members").mkdir(parents=True, exist_ok=True)
-
-        projects_data = [
-            {
-                "git_identity": p.git_identity,
-                "folder_suffix": p.folder_suffix,
-            }
-            for p in projects
-        ]
-        subs_data = {
-            s.project_git_identity: {
-                "status": s.status.value,
-                "direction": s.direction.value,
-            }
-            for s in subscriptions
-        }
-        state = {
-            "member_tag": member_tag,
-            "projects": projects_data,
-            "subscriptions": subs_data,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }
-        _validate_path_component(member_tag, "member_tag")
-        state_file = team_dir / "members" / f"{member_tag}.json"
-        state_file.write_text(json.dumps(state, indent=2))
-
-    def write_removal_signal(
-        self, team_name: str, member_tag: str, *, removed_by: str
-    ) -> None:
-        """Write removal signal to metadata folder."""
-        _validate_path_component(member_tag, "member_tag")
-        team_dir = self._team_dir(team_name)
-        (team_dir / "removed").mkdir(parents=True, exist_ok=True)
-
-        removal_data = {
-            "member_tag": member_tag,
-            "removed_by": removed_by,
-            "removed_at": datetime.now(timezone.utc).isoformat(),
-        }
-        removal_file = team_dir / "removed" / f"{member_tag}.json"
-        removal_file.write_text(json.dumps(removal_data, indent=2))
 
     def read_team_metadata(self, team_name: str) -> dict[str, dict]:
         """Read all member states and removal signals from metadata folder.
@@ -165,3 +91,102 @@ class MetadataService:
                 result["__removals"] = removals
 
         return result
+
+    # ------------------------------------------------------------------
+    # Write — team.json
+    # ------------------------------------------------------------------
+
+    def _write_team_json(self, team: "Team") -> None:
+        """Write team.json only. Creates dirs if needed."""
+        team_dir = self._team_dir(team.name)
+        team_dir.mkdir(parents=True, exist_ok=True)
+        (team_dir / "members").mkdir(exist_ok=True)
+        (team_dir / "removed").mkdir(exist_ok=True)
+
+        team_data = {
+            "name": team.name,
+            "created_by": team.leader_member_tag,
+            "leader_device_id": team.leader_device_id,
+            "created_at": team.created_at.isoformat(),
+        }
+        (team_dir / "team.json").write_text(json.dumps(team_data, indent=2))
+
+    # ------------------------------------------------------------------
+    # Write — unified member state (read-merge-write)
+    # ------------------------------------------------------------------
+
+    def write_member_state(self, team_name: str, member_tag: str, **fields) -> None:
+        """Write or update a member's state file using read-merge-write.
+
+        Reads the existing file (if any), merges in the provided fields,
+        and writes back. Fields not provided are preserved from the existing
+        file, eliminating the schema collision between basic info writes
+        (device_id, status) and enriched writes (projects, subscriptions).
+
+        Always sets updated_at to now.
+        """
+        _validate_path_component(member_tag, "member_tag")
+        team_dir = self._team_dir(team_name)
+        (team_dir / "members").mkdir(parents=True, exist_ok=True)
+
+        member_file = team_dir / "members" / f"{member_tag}.json"
+
+        # Read existing state
+        existing: dict = {}
+        if member_file.exists():
+            try:
+                existing = json.loads(member_file.read_text())
+            except (json.JSONDecodeError, OSError):
+                existing = {}
+
+        # Merge: provided fields overwrite, unset fields preserved
+        existing["member_tag"] = member_tag
+        existing.update(fields)
+        existing["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+        # Atomic write via temp file + os.replace (POSIX-atomic)
+        tmp_file = member_file.with_suffix(".tmp")
+        tmp_file.write_text(json.dumps(existing, indent=2))
+        os.replace(tmp_file, member_file)
+
+    # ------------------------------------------------------------------
+    # Write — convenience: team.json + member basic info
+    # ------------------------------------------------------------------
+
+    def write_team_state(self, team: "Team", members: list["Member"]) -> None:
+        """Write team.json + member state files (basic info, preserving enriched fields).
+
+        Uses write_member_state() for each member, so existing projects/subscriptions
+        fields are preserved via read-merge-write.
+        """
+        self._write_team_json(team)
+
+        for member in members:
+            self.write_member_state(
+                team.name,
+                member.member_tag,
+                device_id=member.device_id,
+                user_id=member.user_id,
+                machine_tag=member.machine_tag,
+                status=member.status.value,
+            )
+
+    # ------------------------------------------------------------------
+    # Write — removal signals
+    # ------------------------------------------------------------------
+
+    def write_removal_signal(
+        self, team_name: str, member_tag: str, *, removed_by: str
+    ) -> None:
+        """Write removal signal to metadata folder."""
+        _validate_path_component(member_tag, "member_tag")
+        team_dir = self._team_dir(team_name)
+        (team_dir / "removed").mkdir(parents=True, exist_ok=True)
+
+        removal_data = {
+            "member_tag": member_tag,
+            "removed_by": removed_by,
+            "removed_at": datetime.now(timezone.utc).isoformat(),
+        }
+        removal_file = team_dir / "removed" / f"{member_tag}.json"
+        removal_file.write_text(json.dumps(removal_data, indent=2))

@@ -127,10 +127,12 @@ def make_reconciliation_service(config: Any):
 
     repos = make_repos()
     devices, folders, metadata = make_managers(config)
+    device_id = config.syncthing.device_id if config.syncthing else ""
     return ReconciliationService(
         **repos,
         devices=devices,
         folders=folders,
         metadata=metadata,
         my_member_tag=config.member_tag,
+        my_device_id=device_id,
     )
