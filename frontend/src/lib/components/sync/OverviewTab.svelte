@@ -119,10 +119,13 @@
 	let activityLoading = $state(true);
 
 	async function loadRecentActivity() {
+		if (!teamName) {
+			activityLoading = false;
+			return;
+		}
 		try {
-			const url = new URL(`${API_BASE}/sync/activity`, window.location.origin);
+			const url = new URL(`${API_BASE}/sync/teams/${encodeURIComponent(teamName)}/activity`, window.location.origin);
 			url.searchParams.set('limit', '8');
-			if (teamName) url.searchParams.set('team_name', teamName);
 			const res = await fetch(url.toString()).catch(() => null);
 			if (res?.ok) {
 				const data = await res.json();

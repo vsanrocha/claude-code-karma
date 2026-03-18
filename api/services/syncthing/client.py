@@ -106,8 +106,9 @@ class SyncthingClient:
         return await self._get("/rest/config/devices")
 
     async def put_config_device(self, device: Dict[str, Any]) -> None:
-        """PUT /rest/config/devices — add or update a device."""
-        await self._put("/rest/config/devices", json=device)
+        """PUT /rest/config/devices/{id} — add or update a single device."""
+        device_id = device["deviceID"]
+        await self._put(f"/rest/config/devices/{device_id}", json=device)
 
     async def delete_config_device(self, device_id: str) -> None:
         """DELETE /rest/config/devices/{device_id} — remove a device."""
@@ -122,8 +123,9 @@ class SyncthingClient:
         return await self._get("/rest/config/folders")
 
     async def put_config_folder(self, folder: Dict[str, Any]) -> None:
-        """PUT /rest/config/folders — add or update a folder."""
-        await self._put("/rest/config/folders", json=folder)
+        """PUT /rest/config/folders/{id} — add or update a single folder."""
+        folder_id = folder["id"]
+        await self._put(f"/rest/config/folders/{folder_id}", json=folder)
 
     async def delete_config_folder(self, folder_id: str) -> None:
         """DELETE /rest/config/folders/{folder_id} — remove a folder."""

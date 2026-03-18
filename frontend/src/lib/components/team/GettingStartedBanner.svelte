@@ -75,7 +75,6 @@
 
 {#if visible}
 	<aside
-		role="complementary"
 		aria-label="Team setup guide"
 		class="getting-started-banner"
 	>

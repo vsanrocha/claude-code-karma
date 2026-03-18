@@ -551,6 +551,7 @@
 								type="button"
 								role="switch"
 								aria-checked={viewMode === 'by-user'}
+								aria-label="Toggle per-user view"
 								onclick={() => (viewMode = viewMode === 'by-user' ? 'by-item' : 'by-user')}
 								class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200
 									{viewMode === 'by-user' ? 'bg-[var(--accent)]' : 'bg-[var(--bg-muted)] border border-[var(--border)]'}"

@@ -5,7 +5,9 @@
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 	import SetupWizard from '$lib/components/sync/SetupWizard.svelte';
 	import OverviewTab from '$lib/components/sync/OverviewTab.svelte';
+	import PendingInvitationCard from '$lib/components/sync/PendingInvitationCard.svelte';
 	import { POLLING_INTERVALS, API_BASE } from '$lib/config';
+	import { goto } from '$app/navigation';
 
 	let { data } = $props();
 
@@ -18,9 +20,9 @@
 
 	// Auto-select first team for the overview dashboard
 	let activeTeamName = $derived.by(() => {
-		if (!syncStatus?.teams) return '';
-		const names = Object.keys(syncStatus.teams);
-		return names.length > 0 ? names[0] : '';
+		if (!syncStatus?.teams || !Array.isArray(syncStatus.teams)) return '';
+		const first = syncStatus.teams[0];
+		return first?.name ?? '';
 	});
 
 	let pollInterval: ReturnType<typeof setInterval> | null = null;
@@ -96,6 +98,11 @@
 			{/if}
 		{/snippet}
 	</PageHeader>
+
+	<PendingInvitationCard onaccepted={(teams) => {
+		if (teams?.length) goto(`/team/${encodeURIComponent(teams[0])}`);
+		else refreshData();
+	}} />
 
 	{#if !syncStatus?.configured}
 		<SetupWizard bind:detect={syncDetect} bind:status={syncStatus} ondone={refreshData} />
