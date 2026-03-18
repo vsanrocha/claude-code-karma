@@ -17,7 +17,7 @@
 		teamName: string;
 		memberTag?: string;
 		onswitchtab?: (tab: string) => void;
-		pendingFolderCount?: number;
+		offeredSubscriptionCount?: number;
 	}
 
 	let {
@@ -25,7 +25,7 @@
 		teamName,
 		memberTag,
 		onswitchtab,
-		pendingFolderCount
+		offeredSubscriptionCount
 	}: Props = $props();
 
 	// Leader check for getting started banner
@@ -74,8 +74,8 @@
 </script>
 
 <div class="space-y-8">
-	<!-- Pending project invitations banner -->
-	{#if pendingFolderCount && pendingFolderCount > 0}
+	<!-- Offered project subscriptions banner -->
+	{#if offeredSubscriptionCount && offeredSubscriptionCount > 0}
 		<button
 			onclick={() => onswitchtab?.('projects')}
 			class="w-full flex items-center gap-3 p-4 rounded-[var(--radius-lg)] border border-[var(--warning)]/30 bg-[var(--warning)]/5 hover:bg-[var(--warning)]/8 transition-colors text-left cursor-pointer"
@@ -83,7 +83,7 @@
 			<span class="w-2.5 h-2.5 rounded-full bg-[var(--warning)] shrink-0" style="box-shadow: 0 0 8px rgba(var(--warning-rgb, 245,158,11), 0.4);"></span>
 			<div class="flex-1 min-w-0">
 				<span class="text-sm font-semibold text-[var(--text-primary)]">
-					{pendingFolderCount} project invitation{pendingFolderCount !== 1 ? 's' : ''} waiting
+					{offeredSubscriptionCount} project invitation{offeredSubscriptionCount !== 1 ? 's' : ''} waiting
 				</span>
 				<p class="text-xs text-[var(--text-muted)] mt-0.5">Accept on the Projects tab to start syncing</p>
 			</div>

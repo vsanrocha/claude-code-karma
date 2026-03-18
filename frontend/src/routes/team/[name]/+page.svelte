@@ -53,30 +53,14 @@
 
 	let memberTag = $derived(data.syncStatus?.member_tag);
 
-	// Pending folder count (for overview banner + tab badge)
-	let pendingCount = $state(0);
-
-	async function fetchPendingCount(signal?: AbortSignal) {
-		try {
-			const res = await fetch(`${API_BASE}/sync/pending`, { signal });
-			if (res.ok) {
-				const data = await res.json();
-				const memberTags = members.map(m => m.member_tag);
-				pendingCount = (data.folders ?? [])
-					.filter((f: any) => f.folder_type === 'out')
-					.filter((f: any) => {
-						if (memberTags.length === 0) return true;
-						return f.from_member && memberTags.includes(f.from_member);
-					})
-					.length;
-			}
-		} catch { /* non-critical */ }
-	}
+	// Offered subscription count — driven by DB subscriptions, not Syncthing pending folders
+	let offeredCount = $derived(
+		subscriptions.filter(s => s.member_tag === memberTag && s.status === 'offered').length
+	);
 
 	// Fetch all team data (used by both polling and manual refresh)
 	async function fetchTeamData(signal?: AbortSignal) {
 		const teamNameEnc = encodeURIComponent(data.teamName);
-		fetchPendingCount(signal); // fire in parallel, don't mix into destructuring
 		const [teamRes, activityRes] = await Promise.all([
 			fetch(`${API_BASE}/sync/teams/${teamNameEnc}`, { signal }),
 			fetch(`${API_BASE}/sync/teams/${teamNameEnc}/activity?limit=20`, { signal })
@@ -97,9 +81,6 @@
 		let controller = new AbortController();
 		let retryCount = 0;
 		let fastRetryTimer: ReturnType<typeof setTimeout> | null = null;
-
-		// Fetch pending count immediately on mount
-		fetchPendingCount();
 
 		// Fast retry when team isn't loaded yet (e.g. just accepted invitation)
 		async function fastRetryIfNeeded() {
@@ -242,8 +223,8 @@
 			<TabsTrigger value="members" icon={Contact}>Members ({members.filter(m => m.member_tag !== memberTag).length})</TabsTrigger>
 			<TabsTrigger value="projects" icon={FolderSync}>
 				Projects ({projects.length})
-				{#if pendingCount > 0}
-					<span class="ml-1 px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-[var(--warning)] text-[var(--bg-base)]">{pendingCount}</span>
+				{#if offeredCount > 0}
+					<span class="ml-1 px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-[var(--warning)] text-[var(--bg-base)]">{offeredCount}</span>
 				{/if}
 			</TabsTrigger>
 			<TabsTrigger value="activity" icon={Activity}>Activity</TabsTrigger>
@@ -256,7 +237,7 @@
 				teamName={data.teamName}
 				{memberTag}
 				onswitchtab={(tab) => activeTab = tab}
-				pendingFolderCount={pendingCount}
+				offeredSubscriptionCount={offeredCount}
 			/>
 		</Tabs.Content>
 

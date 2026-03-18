@@ -95,11 +95,11 @@
 		}
 	}
 
-	async function handleSubscriptionAction(gitIdentity: string, action: 'accept' | 'pause' | 'resume' | 'decline') {
+	async function handleSubscriptionAction(gitIdentity: string, action: 'accept' | 'pause' | 'resume' | 'decline', direction: string = 'both') {
 		subscriptionActing = gitIdentity;
 		try {
 			const url = `${API_BASE}/sync/subscriptions/${encodeURIComponent(teamName)}/${encodeURIComponent(gitIdentity)}/${action}`;
-			const body = action === 'accept' ? JSON.stringify({ direction: 'both' }) : undefined;
+			const body = action === 'accept' ? JSON.stringify({ direction }) : undefined;
 			const res = await fetch(url, {
 				method: 'POST',
 				headers: body ? { 'Content-Type': 'application/json' } : {},
@@ -421,14 +421,34 @@
 						<!-- Subscription actions -->
 						<div class="flex items-center gap-1.5">
 							{#if mySub.status === 'offered'}
-								<button
-									onclick={() => handleSubscriptionAction(project.git_identity, 'accept')}
-									disabled={isActing}
-									class="flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md bg-[var(--success)] text-white hover:bg-[var(--success)]/85 transition-colors disabled:opacity-50"
-								>
-									{#if isActing}<Loader2 size={11} class="animate-spin" />{:else}<Play size={11} />{/if}
-									Accept
-								</button>
+								<!-- Direction-aware accept buttons -->
+								<div class="flex items-center gap-1 rounded-md border border-[var(--success)]/30 overflow-hidden">
+									<button
+										onclick={() => handleSubscriptionAction(project.git_identity, 'accept', 'both')}
+										disabled={isActing}
+										class="flex items-center gap-1 px-2 py-1 text-xs font-medium bg-[var(--success)] text-white hover:bg-[var(--success)]/85 transition-colors disabled:opacity-50"
+										title="Send & receive sessions"
+									>
+										{#if isActing}<Loader2 size={10} class="animate-spin" />{:else}<ArrowUpDown size={10} />{/if}
+										Both
+									</button>
+									<button
+										onclick={() => handleSubscriptionAction(project.git_identity, 'accept', 'send')}
+										disabled={isActing}
+										class="flex items-center gap-1 px-2 py-1 text-xs font-medium bg-[var(--success)]/80 text-white hover:bg-[var(--success)]/65 transition-colors disabled:opacity-50"
+										title="Send only"
+									>
+										<ArrowUp size={10} />
+									</button>
+									<button
+										onclick={() => handleSubscriptionAction(project.git_identity, 'accept', 'receive')}
+										disabled={isActing}
+										class="flex items-center gap-1 px-2 py-1 text-xs font-medium bg-[var(--success)]/80 text-white hover:bg-[var(--success)]/65 transition-colors disabled:opacity-50"
+										title="Receive only"
+									>
+										<ArrowDown size={10} />
+									</button>
+								</div>
 								<button
 									onclick={() => handleSubscriptionAction(project.git_identity, 'decline')}
 									disabled={isActing}
@@ -457,12 +477,12 @@
 								</button>
 							{:else if mySub.status === 'declined'}
 								<button
-									onclick={() => handleSubscriptionAction(project.git_identity, 'accept')}
+									onclick={() => handleSubscriptionAction(project.git_identity, 'accept', 'both')}
 									disabled={isActing}
 									class="flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md bg-[var(--success)] text-white hover:bg-[var(--success)]/85 transition-colors disabled:opacity-50"
 								>
 									{#if isActing}<Loader2 size={11} class="animate-spin" />{:else}<Play size={11} />{/if}
-									Accept
+									Re-accept
 								</button>
 							{/if}
 						</div>
