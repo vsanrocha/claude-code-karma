@@ -19,6 +19,7 @@ class SyncEventType(str, Enum):
     member_activated = "member_activated"
     member_removed = "member_removed"
     member_auto_left = "member_auto_left"
+    member_left = "member_left"
     project_shared = "project_shared"
     project_removed = "project_removed"
     subscription_offered = "subscription_offered"

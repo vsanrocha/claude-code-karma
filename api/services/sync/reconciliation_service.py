@@ -1,7 +1,6 @@
 """Reconciliation pipeline. Runs every 60s."""
 from __future__ import annotations
 
-import json
 import logging
 import re
 import sqlite3
@@ -94,7 +93,7 @@ class ReconciliationService:
         so subsequent phases have something to iterate over.
         """
         try:
-            configured_folders = await self.folders._client.get_config_folders()
+            configured_folders = await self.folders.get_configured_folders()
         except Exception as exc:
             logger.debug("phase_team_discovery: cannot query folders: %s", exc)
             return
@@ -114,15 +113,13 @@ class ReconciliationService:
 
             # Read team.json from the metadata folder on disk
             try:
-                team_dir = self.metadata._team_dir(team_name)
-                team_json_path = team_dir / "team.json"
-                if not team_json_path.exists():
+                team_data = self.metadata.read_team_json(team_name)
+                if team_data is None:
                     logger.debug(
                         "phase_team_discovery: no team.json yet for %s", team_name
                     )
                     continue
 
-                team_data = json.loads(team_json_path.read_text())
                 leader_member_tag = team_data.get("created_by", "")
                 leader_device_id = team_data.get("leader_device_id", "")
 

@@ -100,7 +100,7 @@
 	onMount(() => {
 		document.addEventListener('click', handleClickOutside);
 		checkPendingDevices();
-		pendingPollInterval = setInterval(checkPendingDevices, 30000);
+		pendingPollInterval = setInterval(checkPendingDevices, 60000);
 	});
 
 	onDestroy(() => {

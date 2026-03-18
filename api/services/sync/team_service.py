@@ -104,7 +104,7 @@ class TeamService:
         # Immediately share metadata + project outbox folders with the new device
         # so the joiner sees pending folders without waiting for the 60s reconciliation timer.
         try:
-            all_folders = await self.folders._client.get_config_folders()
+            all_folders = await self.folders.get_configured_folders()
 
             # Share metadata folder
             meta_folder_id = build_metadata_folder_id(team_name)
@@ -202,6 +202,48 @@ class TeamService:
             detail={"device_id": removed.device_id, "removed_by": team.leader_member_tag},
         ))
         return removed
+
+    async def leave_team(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        team_name: str,
+        member_tag: str,
+    ) -> None:
+        """Leave a team voluntarily. Non-leaders only.
+
+        Runs the same cleanup as reconciliation auto-leave:
+        removes folders, unpairs devices not shared with other teams, deletes team locally.
+        """
+        team = self.teams.get(conn, team_name)
+        if team is None:
+            raise ValueError(f"Team '{team_name}' not found")
+
+        if team.leader_member_tag == member_tag:
+            raise ValueError("Team leaders must dissolve the team, not leave it")
+
+        # Same cleanup as _auto_leave in ReconciliationService
+        projects = self.projects.list_for_team(conn, team_name)
+        members = self.members.list_for_team(conn, team_name)
+        suffixes = [p.folder_suffix for p in projects]
+        tags = [m.member_tag for m in members]
+
+        await self.folders.cleanup_team_folders(suffixes, tags, team_name)
+
+        # Unpair devices not shared with other teams
+        for member in members:
+            if member.member_tag == member_tag:
+                continue
+            others = self.members.get_by_device(conn, member.device_id)
+            if len([o for o in others if o.team_name != team_name]) == 0:
+                await self.devices.unpair(member.device_id)
+
+        self.teams.delete(conn, team_name)
+        self.events.log(conn, SyncEvent(
+            event_type=SyncEventType.member_left,
+            team_name=team_name,
+            member_tag=member_tag,
+        ))
 
     async def dissolve_team(
         self,

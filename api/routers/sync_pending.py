@@ -68,6 +68,7 @@ async def accept_pending_device(
     device_id: str,
     req: AcceptDeviceRequest,
     client=Depends(get_syncthing_client),
+    config=Depends(require_config),
 ):
     """Accept a pending device and auto-accept any karma-meta--* folders from it."""
     device_config = {
@@ -102,14 +103,17 @@ async def accept_pending_device(
             team_name = m.group(1)
 
             try:
+                devices = [{"deviceID": device_id, "encryptionPassword": ""}]
+                local_id = config.syncthing.device_id if config.syncthing else None
+                if local_id:
+                    devices.append({"deviceID": local_id, "encryptionPassword": ""})
+
                 folder_config = {
                     "id": folder_id,
                     "label": folder_id,
                     "path": str(karma_base / "metadata-folders" / folder_id),
                     "type": "sendreceive",
-                    "devices": [
-                        {"deviceID": device_id, "encryptionPassword": ""},
-                    ],
+                    "devices": devices,
                     "rescanIntervalS": 3600,
                     "fsWatcherEnabled": True,
                     "fsWatcherDelayS": 10,
@@ -147,7 +151,7 @@ async def dismiss_pending_device(
 # --- Pending folders -------------------------------------------------------
 
 # Pattern: karma-out--{member_tag}--{suffix}
-_KARMA_FOLDER_RE = re.compile(r"^karma-(out|meta)--(.+?)--(.+)$")
+_KARMA_FOLDER_RE = re.compile(r"^karma-(out|meta)--(.+?)(?:--(.+))?$")
 
 
 def _parse_folder_id(folder_id: str) -> dict:

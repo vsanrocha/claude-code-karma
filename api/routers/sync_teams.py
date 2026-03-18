@@ -9,7 +9,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from domain.team import AuthorizationError, InvalidTransitionError
-from domain.events import SyncEvent, SyncEventType
 from routers.sync_deps import (
     get_conn,
     make_repos,
@@ -141,53 +140,12 @@ async def leave_team(
     config=Depends(require_config),
     svc=Depends(get_team_svc),
 ):
-    """Leave a team. Non-leaders use this to self-remove.
-
-    Runs the same cleanup as auto-leave in reconciliation:
-    removes folders, unpairs devices not shared with other teams, deletes team locally.
-    """
+    """Leave a team. Non-leaders use this to self-remove."""
     member_tag = config.member_tag if config else ""
-    repos = make_repos()
-    team = repos["teams"].get(conn, name)
-    if team is None:
-        raise HTTPException(404, f"Team '{name}' not found")
-
-    if team.leader_member_tag == member_tag:
-        raise HTTPException(400, "Team leaders must dissolve the team, not leave it")
-
-    # Run the same cleanup as reconciliation auto-leave
-    from services.syncthing.client import SyncthingClient
-    from services.syncthing.device_manager import DeviceManager
-    from services.syncthing.folder_manager import FolderManager
-    from services.sync.metadata_service import MetadataService
-    from config import settings as app_settings
-
-    api_key = config.syncthing.api_key if config.syncthing else ""
-    client = SyncthingClient(api_url="http://localhost:8384", api_key=api_key)
-    devices = DeviceManager(client)
-    folders = FolderManager(client, karma_base=app_settings.karma_base)
-
-    projects = repos["projects"].list_for_team(conn, name)
-    members = repos["members"].list_for_team(conn, name)
-    suffixes = [p.folder_suffix for p in projects]
-    tags = [m.member_tag for m in members]
-
-    await folders.cleanup_team_folders(suffixes, tags, name)
-
-    # Unpair devices not shared with other teams
-    for member in members:
-        if member.member_tag == member_tag:
-            continue
-        others = repos["members"].get_by_device(conn, member.device_id)
-        if len([o for o in others if o.team_name != name]) == 0:
-            await devices.unpair(member.device_id)
-
-    repos["teams"].delete(conn, name)
-    repos["events"].log(conn, SyncEvent(
-        event_type=SyncEventType.member_auto_left,
-        team_name=name,
-        member_tag=member_tag,
-    ))
+    try:
+        await svc.leave_team(conn, team_name=name, member_tag=member_tag)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     return {"ok": True, "name": name}
 
 

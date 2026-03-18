@@ -39,6 +39,14 @@ class FolderManager:
         self._karma_base = karma_base
 
     # ------------------------------------------------------------------
+    # Public accessors
+    # ------------------------------------------------------------------
+
+    async def get_configured_folders(self) -> list[dict]:
+        """Return all configured Syncthing folders."""
+        return await self._client.get_config_folders()
+
+    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 

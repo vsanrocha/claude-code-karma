@@ -36,6 +36,17 @@ class MetadataService:
         _validate_path_component(team_name, "team_name")
         return self.meta_base / f"karma-meta--{team_name}"
 
+    def read_team_json(self, team_name: str) -> dict | None:
+        """Read team.json from the metadata folder. Returns None if not found."""
+        team_dir = self._team_dir(team_name)
+        team_json_path = team_dir / "team.json"
+        if not team_json_path.exists():
+            return None
+        try:
+            return json.loads(team_json_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            return None
+
     def write_team_state(self, team: "Team", members: list["Member"]) -> None:
         """Write team.json + member state files to metadata folder."""
         team_dir = self._team_dir(team.name)

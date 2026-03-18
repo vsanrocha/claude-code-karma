@@ -59,7 +59,14 @@
 			const res = await fetch(`${API_BASE}/sync/pending`, { signal });
 			if (res.ok) {
 				const data = await res.json();
-				pendingCount = (data.folders ?? []).filter((f: any) => f.folder_type === 'out').length;
+				const memberTags = members.map(m => m.member_tag);
+				pendingCount = (data.folders ?? [])
+					.filter((f: any) => f.folder_type === 'out')
+					.filter((f: any) => {
+						if (memberTags.length === 0) return true;
+						return f.from_member && memberTags.includes(f.from_member);
+					})
+					.length;
 			}
 		} catch { /* non-critical */ }
 	}
@@ -67,10 +74,10 @@
 	// Fetch all team data (used by both polling and manual refresh)
 	async function fetchTeamData(signal?: AbortSignal) {
 		const teamNameEnc = encodeURIComponent(data.teamName);
+		fetchPendingCount(signal); // fire in parallel, don't mix into destructuring
 		const [teamRes, activityRes] = await Promise.all([
 			fetch(`${API_BASE}/sync/teams/${teamNameEnc}`, { signal }),
-			fetch(`${API_BASE}/sync/teams/${teamNameEnc}/activity?limit=20`, { signal }),
-			fetchPendingCount(signal)
+			fetch(`${API_BASE}/sync/teams/${teamNameEnc}/activity?limit=20`, { signal })
 		]);
 
 		if (teamRes.ok) {
@@ -251,6 +258,7 @@
 				{memberTag}
 				{isLeader}
 				allProjects={data.allProjects}
+				teamMemberTags={members.map(m => m.member_tag)}
 				onrefresh={handleRefresh}
 			/>
 		</Tabs.Content>

@@ -24,6 +24,7 @@
 		memberTag: string | undefined;
 		isLeader?: boolean;
 		allProjects: { encoded_name: string; name: string; path: string }[];
+		teamMemberTags?: string[];
 		onrefresh: () => void;
 	}
 
@@ -34,6 +35,7 @@
 		memberTag,
 		isLeader = false,
 		allProjects,
+		teamMemberTags = [],
 		onrefresh
 	}: Props = $props();
 
@@ -164,6 +166,10 @@
 				const data = await res.json();
 				pendingFolders = (data.folders ?? [])
 					.filter((f: any) => f.folder_type === 'out')
+					.filter((f: any) => {
+						if (!teamMemberTags || teamMemberTags.length === 0) return true;
+						return f.from_member && teamMemberTags.includes(f.from_member);
+					})
 					.map((f: any) => {
 						const parts = f.folder_id.split('--');
 						const suffix = parts.length >= 3 ? parts.slice(2).join('--') : f.folder_id;
@@ -203,12 +209,20 @@
 		finally { rejectingId = null; }
 	}
 
+	async function acceptFolderQuiet(folder: PendingFolder) {
+		try {
+			await fetch(`${API_BASE}/sync/pending/accept/${encodeURIComponent(folder.folder_id)}`, {
+				method: 'POST'
+			});
+		} catch { /* */ }
+	}
+
 	async function acceptAll() {
 		acceptingAll = true;
 		try {
-			for (const folder of pendingFolders) {
-				await acceptFolder(folder);
-			}
+			await Promise.all(pendingFolders.map(f => acceptFolderQuiet(f)));
+			await loadPendingFolders();
+			onrefresh();
 		} finally {
 			acceptingAll = false;
 		}
