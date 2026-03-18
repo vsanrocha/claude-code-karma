@@ -1,0 +1,301 @@
+"""ProjectService — project sharing + subscription management orchestration."""
+from __future__ import annotations
+
+import sqlite3
+from typing import TYPE_CHECKING
+
+from domain.project import SharedProject, derive_folder_suffix
+from domain.subscription import Subscription, SyncDirection
+from domain.events import SyncEvent, SyncEventType
+from domain.team import AuthorizationError
+
+if TYPE_CHECKING:
+    from repositories.project_repo import ProjectRepository
+    from repositories.subscription_repo import SubscriptionRepository
+    from repositories.member_repo import MemberRepository
+    from repositories.team_repo import TeamRepository
+    from repositories.event_repo import EventRepository
+    from services.syncthing.folder_manager import FolderManager
+    from services.sync.metadata_service import MetadataService
+
+
+class ProjectService:
+    def __init__(
+        self,
+        projects: "ProjectRepository",
+        subs: "SubscriptionRepository",
+        members: "MemberRepository",
+        teams: "TeamRepository",
+        folders: "FolderManager",
+        metadata: "MetadataService",
+        events: "EventRepository",
+    ):
+        self.projects = projects
+        self.subs = subs
+        self.members = members
+        self.teams = teams
+        self.folders = folders
+        self.metadata = metadata
+        self.events = events
+
+    async def share_project(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        team_name: str,
+        by_device: str,
+        git_identity: str,
+        encoded_name: str | None = None,
+    ) -> SharedProject:
+        """Share a project with the team. Only the leader may share.
+
+        Creates OFFERED subscriptions for each active non-leader member.
+        If `encoded_name` is provided, creates the leader's outbox folder.
+        """
+        team = self.teams.get(conn, team_name)
+        if not team or not team.is_leader(by_device):
+            raise AuthorizationError("Only leader can share projects")
+        if not git_identity:
+            raise ValueError("git_identity is required (git-only projects)")
+
+        project = SharedProject(
+            team_name=team_name,
+            git_identity=git_identity,
+            encoded_name=encoded_name,
+            folder_suffix=derive_folder_suffix(git_identity),
+        )
+        self.projects.save(conn, project)
+
+        # Create OFFERED subscription for each active non-leader member
+        for member in self.members.list_for_team(conn, team_name):
+            if member.is_active and not team.is_leader(member.device_id):
+                sub = Subscription(
+                    member_tag=member.member_tag,
+                    team_name=team_name,
+                    project_git_identity=git_identity,
+                )
+                self.subs.save(conn, sub)
+
+        # Create leader's outbox if they have the repo locally
+        if encoded_name:
+            await self.folders.ensure_outbox_folder(
+                team.leader_member_tag, project.folder_suffix,
+            )
+
+        self.events.log(conn, SyncEvent(
+            event_type=SyncEventType.project_shared,
+            team_name=team_name,
+            project_git_identity=git_identity,
+        ))
+        return project
+
+    async def remove_project(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        team_name: str,
+        by_device: str,
+        git_identity: str,
+    ) -> SharedProject:
+        """Remove a project from the team. Only the leader may remove.
+
+        Declines all subscriptions and cleans up Syncthing folders.
+        """
+        team = self.teams.get(conn, team_name)
+        if not team or not team.is_leader(by_device):
+            raise AuthorizationError("Only leader can remove projects")
+
+        project = self.projects.get(conn, team_name, git_identity)
+        if not project:
+            raise ValueError(f"Project '{git_identity}' not found in team '{team_name}'")
+
+        removed = project.remove()
+        self.projects.save(conn, removed)
+
+        # Decline all subscriptions for this project
+        for sub in self.subs.list_for_project(conn, team_name, git_identity):
+            if sub.status.value != "declined":
+                self.subs.save(conn, sub.decline())
+
+        # Cleanup Syncthing folders for all members
+        members = self.members.list_for_team(conn, team_name)
+        tags = [m.member_tag for m in members]
+        await self.folders.cleanup_project_folders(removed.folder_suffix, tags)
+
+        self.events.log(conn, SyncEvent(
+            event_type=SyncEventType.project_removed,
+            team_name=team_name,
+            project_git_identity=git_identity,
+        ))
+        return removed
+
+    async def accept_subscription(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        member_tag: str,
+        team_name: str,
+        git_identity: str,
+        direction: SyncDirection = SyncDirection.BOTH,
+    ) -> Subscription:
+        """Accept a subscription with the given sync direction.
+
+        Applies the direction by creating outbox and/or inbox folders as needed.
+        """
+        sub = self.subs.get(conn, member_tag, team_name, git_identity)
+        if sub is None:
+            raise ValueError(
+                f"Subscription not found for member '{member_tag}' "
+                f"on project '{git_identity}' in team '{team_name}'"
+            )
+
+        accepted = sub.accept(direction)
+        self.subs.save(conn, accepted)
+        await self._apply_sync_direction(conn, accepted)
+
+        self.events.log(conn, SyncEvent(
+            event_type=SyncEventType.subscription_accepted,
+            team_name=team_name,
+            member_tag=member_tag,
+            project_git_identity=git_identity,
+            detail={"direction": direction.value},
+        ))
+        return accepted
+
+    async def pause_subscription(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        member_tag: str,
+        team_name: str,
+        git_identity: str,
+    ) -> Subscription:
+        """Pause an accepted subscription."""
+        sub = self.subs.get(conn, member_tag, team_name, git_identity)
+        if sub is None:
+            raise ValueError("Subscription not found")
+
+        paused = sub.pause()
+        self.subs.save(conn, paused)
+
+        self.events.log(conn, SyncEvent(
+            event_type=SyncEventType.subscription_paused,
+            team_name=team_name,
+            member_tag=member_tag,
+            project_git_identity=git_identity,
+        ))
+        return paused
+
+    async def resume_subscription(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        member_tag: str,
+        team_name: str,
+        git_identity: str,
+    ) -> Subscription:
+        """Resume a paused subscription, re-applying sync direction."""
+        sub = self.subs.get(conn, member_tag, team_name, git_identity)
+        if sub is None:
+            raise ValueError("Subscription not found")
+
+        resumed = sub.resume()
+        self.subs.save(conn, resumed)
+        await self._apply_sync_direction(conn, resumed)
+
+        self.events.log(conn, SyncEvent(
+            event_type=SyncEventType.subscription_resumed,
+            team_name=team_name,
+            member_tag=member_tag,
+            project_git_identity=git_identity,
+        ))
+        return resumed
+
+    async def decline_subscription(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        member_tag: str,
+        team_name: str,
+        git_identity: str,
+    ) -> Subscription:
+        """Decline a subscription."""
+        sub = self.subs.get(conn, member_tag, team_name, git_identity)
+        if sub is None:
+            raise ValueError("Subscription not found")
+
+        declined = sub.decline()
+        self.subs.save(conn, declined)
+
+        self.events.log(conn, SyncEvent(
+            event_type=SyncEventType.subscription_declined,
+            team_name=team_name,
+            member_tag=member_tag,
+            project_git_identity=git_identity,
+        ))
+        return declined
+
+    async def change_direction(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        member_tag: str,
+        team_name: str,
+        git_identity: str,
+        direction: SyncDirection,
+    ) -> Subscription:
+        """Change the sync direction of an accepted subscription.
+
+        Removes outbox if switching away from send/both.
+        Creates outbox if switching to send/both from receive.
+        """
+        sub = self.subs.get(conn, member_tag, team_name, git_identity)
+        if sub is None:
+            raise ValueError("Subscription not found")
+
+        old_direction = sub.direction
+        changed = sub.change_direction(direction)
+        self.subs.save(conn, changed)
+
+        project = self.projects.get(conn, team_name, git_identity)
+
+        # Remove outbox if no longer sending
+        was_sending = old_direction in (SyncDirection.SEND, SyncDirection.BOTH)
+        now_sending = direction in (SyncDirection.SEND, SyncDirection.BOTH)
+
+        if project:
+            if was_sending and not now_sending:
+                await self.folders.remove_outbox_folder(member_tag, project.folder_suffix)
+            elif not was_sending and now_sending:
+                await self.folders.ensure_outbox_folder(member_tag, project.folder_suffix)
+
+        self.events.log(conn, SyncEvent(
+            event_type=SyncEventType.direction_changed,
+            team_name=team_name,
+            member_tag=member_tag,
+            project_git_identity=git_identity,
+            detail={"old_direction": old_direction.value, "new_direction": direction.value},
+        ))
+        return changed
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    async def _apply_sync_direction(self, conn: sqlite3.Connection, sub: Subscription) -> None:
+        """Create Syncthing folders based on subscription direction."""
+        project = self.projects.get(conn, sub.team_name, sub.project_git_identity)
+        if not project:
+            return
+
+        if sub.direction in (SyncDirection.SEND, SyncDirection.BOTH):
+            await self.folders.ensure_outbox_folder(sub.member_tag, project.folder_suffix)
+
+        if sub.direction in (SyncDirection.RECEIVE, SyncDirection.BOTH):
+            # Create inbox folders for each active teammate (they are senders)
+            members = self.members.list_for_team(conn, sub.team_name)
+            for m in members:
+                if m.member_tag != sub.member_tag and m.is_active:
+                    await self.folders.ensure_inbox_folder(
+                        m.member_tag, project.folder_suffix, m.device_id,
+                    )
