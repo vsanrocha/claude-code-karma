@@ -238,6 +238,7 @@
 				{members}
 				teamName={data.teamName}
 				{memberTag}
+				{isLeader}
 				onrefresh={handleRefresh}
 			/>
 		</Tabs.Content>
@@ -248,6 +249,7 @@
 				teamName={data.teamName}
 				{subscriptions}
 				{memberTag}
+				{isLeader}
 				allProjects={data.allProjects}
 				onrefresh={handleRefresh}
 			/>

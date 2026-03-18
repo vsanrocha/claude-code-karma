@@ -22,6 +22,7 @@
 		teamName: string;
 		subscriptions: SyncSubscription[];
 		memberTag: string | undefined;
+		isLeader?: boolean;
 		allProjects: { encoded_name: string; name: string; path: string }[];
 		onrefresh: () => void;
 	}
@@ -31,6 +32,7 @@
 		teamName,
 		subscriptions,
 		memberTag,
+		isLeader = false,
 		allProjects,
 		onrefresh
 	}: Props = $props();
@@ -279,18 +281,20 @@
 		</div>
 	{/if}
 
-	<!-- Header row -->
-	<div class="flex items-center justify-between">
-		<button
-			onclick={() => (showAddProject = true)}
-			class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-[var(--radius-md)]
-				border border-[var(--border)] text-[var(--text-secondary)]
-				hover:bg-[var(--bg-muted)] hover:text-[var(--text-primary)] transition-colors"
-		>
-			<Plus size={13} />
-			Add Projects
-		</button>
-	</div>
+	<!-- Header row (leader only: Add Projects) -->
+	{#if isLeader}
+		<div class="flex items-center justify-between">
+			<button
+				onclick={() => (showAddProject = true)}
+				class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-[var(--radius-md)]
+					border border-[var(--border)] text-[var(--text-secondary)]
+					hover:bg-[var(--bg-muted)] hover:text-[var(--text-primary)] transition-colors"
+			>
+				<Plus size={13} />
+				Add Projects
+			</button>
+		</div>
+	{/if}
 
 	{#if removeProjectError}
 		<p class="text-xs text-[var(--error)]" aria-live="polite">{removeProjectError}</p>
@@ -340,8 +344,8 @@
 							{project.status}
 						</span>
 
-						<!-- Remove button -->
-						{#if removeProjectConfirm === project.git_identity}
+						<!-- Remove button (leader only) -->
+						{#if isLeader && removeProjectConfirm === project.git_identity}
 							<div class="flex items-center gap-1.5">
 								<button
 									onclick={() => handleRemoveProject(project.git_identity)}
@@ -356,7 +360,7 @@
 									Cancel
 								</button>
 							</div>
-						{:else}
+						{:else if isLeader}
 							<button
 								onclick={() => (removeProjectConfirm = project.git_identity)}
 								class="p-1.5 rounded text-[var(--text-muted)] hover:text-[var(--error)] hover:bg-[var(--error)]/10 transition-colors"

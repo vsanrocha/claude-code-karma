@@ -8,10 +8,11 @@
 		members: SyncTeamMember[];
 		teamName: string;
 		memberTag: string | undefined;
+		isLeader?: boolean;
 		onrefresh: () => void;
 	}
 
-	let { members, teamName, memberTag, onrefresh }: Props = $props();
+	let { members, teamName, memberTag, isLeader = false, onrefresh }: Props = $props();
 
 	let confirmRemove = $state<string | null>(null);
 	let removing = $state(false);
@@ -96,8 +97,8 @@
 </script>
 
 <div class="space-y-4">
-	<!-- Add Member Section -->
-	{#if showAddForm}
+	<!-- Add Member Section (leader only) -->
+	{#if isLeader && showAddForm}
 		<div class="p-4 rounded-lg border border-[var(--accent)]/30 bg-[var(--accent)]/5 space-y-3">
 			<div class="space-y-1.5">
 				<label for="pairing-code" class="block text-xs font-medium text-[var(--text-secondary)]">
@@ -145,7 +146,7 @@
 				</button>
 			</div>
 		</div>
-	{:else}
+	{:else if isLeader}
 		<button
 			onclick={() => (showAddForm = true)}
 			class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-[var(--radius-md)]
@@ -206,8 +207,8 @@
 							</div>
 						</div>
 
-						<!-- Remove button -->
-						{#if !self}
+						<!-- Remove button (leader only) -->
+						{#if isLeader && !self}
 							{#if confirmRemove === member.member_tag}
 								<div class="flex items-center gap-1 shrink-0">
 									<button
