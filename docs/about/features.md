@@ -80,46 +80,34 @@ All filters and view settings are saved in the URL. Share a link to give someone
 ## Cross-Team Session Sharing
 
 ### Overview
-Freelancers register their projects with your team and use the CLI to auto-sync sessions. You see everything in a unified dashboard without manual commands.
+Share sessions with teammates and freelancers using peer-to-peer sync. Everyone sees relevant sessions in a unified dashboard — no manual copying, no central server.
 
 ### How it Works
-1. You create a team
-2. Freelancer joins the team by device ID
-3. Freelancer registers their projects with `karma project add`
-4. Freelancer runs `karma watch` to auto-sync
-5. New sessions appear in your dashboard on the Teams page
+1. You create a team from the `/team` page
+2. Your teammate generates a **join code** from their `/sync` page
+3. You paste the code to add them — devices pair automatically via Syncthing
+4. You share projects with the team — each member gets a **subscription**
+5. Members accept subscriptions and choose their sync direction (send, receive, or both)
+6. Sessions flow automatically — new sessions appear within seconds on LAN
 
-### Real-Time Syncing
-Sessions are synced automatically via Syncthing as they're created. No manual commands needed — just keep the watcher running.
+### Subscription Control
+Every member controls what they receive. When a project is shared with a team, each member gets an **offered** subscription. They can:
+- **Accept** it (and choose send-only, receive-only, or both)
+- **Pause** it temporarily
+- **Decline** it entirely
+
+This means a team of 5 people sharing 10 projects can each have different preferences — no one-size-fits-all.
 
 ### Read-Only Remote Sessions
-View sessions synced from team members. Remote sessions are read-only in the dashboard — you can't modify them, but you can leave feedback.
-
-### Feedback and Annotations
-Leave feedback on individual sessions. Feedback syncs back to freelancers so they know what you thought of their work.
-
-## Command-Line Tool (Karma CLI)
-
-Manage session sync from the terminal:
-
-```bash
-karma init                           # Initialize on this machine
-karma team create alpha              # Create a team
-karma team add alice <device-id>     # Add a team member
-karma project add app --path /work/app --team alpha
-karma watch --team alpha             # Auto-sync as you work
-karma status                         # Check sync status
-```
-
-See [Syncing Sessions](syncing-sessions.md) for full details.
+Sessions from teammates show up in your dashboard as read-only. You can browse their conversations, see tool usage, and learn from their approach — but you can't modify their data.
 
 ## Syncthing Backend
 
-Uses Syncthing for automatic, encrypted, peer-to-peer file sync. Sessions are packaged locally and synced without any extra daemon.
+Uses Syncthing for automatic, encrypted, peer-to-peer file sync. Sessions are packaged locally and synced directly between machines.
 
 **Why Syncthing?**
-- No extra infrastructure to manage (just start Syncthing once)
-- Real-time sync (no manual pull commands)
-- Works over LAN, VPN, or the internet
-- Encrypted end-to-end (relays can't read data)
-- Simple setup (exchange device IDs, create team, start watching)
+- No servers to manage — your data never touches a third party
+- Real-time sync — sessions appear within seconds on the same network
+- Works anywhere — LAN, VPN, or across the internet via encrypted relays
+- End-to-end encrypted — even relay servers can't read your data
+- Simple setup — the `/sync` page walks you through everything

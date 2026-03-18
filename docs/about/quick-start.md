@@ -70,36 +70,32 @@ See [Hooks Guide](hooks-guide.md) for detailed setup.
 
 ## Optional: Enable Session Sync with Syncthing
 
-To share sessions with your team via Syncthing:
+Share sessions with your team — no cloud, no accounts, fully peer-to-peer.
 
 ```bash
-# Install Syncthing on each machine
-# https://syncthing.net/downloads/
+# 1. Install Syncthing on each machine
+#    macOS: brew install syncthing && brew services start syncthing
+#    Linux: sudo apt install syncthing && systemctl --user enable --now syncthing
 
-# Install the CLI tool
-pip install -e cli/karma/
+# 2. Open the Karma dashboard and go to /sync
+#    The setup wizard walks you through picking your user ID
+#    and detecting Syncthing automatically.
 
-# Initialize on your machine
-karma init
+# 3. Create a team on the /team page
+#    Click "Create Team" and give it a name like "alpha"
 
-# You'll see your Syncthing Device ID. Share it with your team lead.
+# 4. Add teammates via join codes
+#    Your teammate generates a join code from their /sync page.
+#    You paste it on the Team page to add them.
 
-# Create a team
-karma team create alpha
-
-# Add a team member
-karma team add alice <their-device-id>
-
-# Register a project
-karma project add acme-app --path /Users/you/work/acme-app --team alpha
-
-# Start the watcher (keeps running, syncs automatically)
-karma watch --team alpha
+# 5. Share projects
+#    Pick which projects to share with the team.
+#    Each member gets a subscription they can accept, pause, or decline.
 ```
 
-Sessions are packaged and synced automatically. Check the Teams page in the dashboard to see remote sessions.
+Sessions are packaged and synced automatically. Teammates' sessions appear in your dashboard within seconds on LAN, or a few minutes over the internet.
 
-See [Syncing Sessions](syncing-sessions.md) for full details.
+See [Syncing Sessions](syncing-sessions.md) for the full walkthrough.
 
 ## Next Steps
 

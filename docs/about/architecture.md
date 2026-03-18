@@ -137,8 +137,17 @@ All endpoints are on the API server at `http://localhost:8000`.
 - `GET /live-sessions` — Current session state (requires hooks)
 
 **Sync:**
-- `GET /sync/status` — Sync configuration
-- `GET /sync/teams` — Team list
+- `GET /sync/status` — Sync config, member tag, Syncthing status
+- `GET /sync/detect` — Check if Syncthing is installed/running
+- `POST /sync/init` — Initialize sync setup
+- `GET /sync/teams` — List all teams
+- `GET /sync/teams/{name}` — Team detail with members, projects, subscriptions
+- `POST /sync/teams` — Create a team
+- `POST /sync/teams/{name}/members` — Add member via pairing code
+- `POST /sync/teams/{name}/projects` — Share a project
+- `POST /sync/subscriptions/{team}/{git_identity}/accept` — Accept a subscription
+- `GET /sync/pending-devices` — Pending Syncthing device requests
+- `GET /sync/pending` — Pending folder offers from peers
 - `GET /users` — List remote users
 - `GET /users/{user}/projects` — Remote projects
 

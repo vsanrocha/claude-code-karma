@@ -14,9 +14,9 @@ We use **Syncthing** — an open-source, encrypted, peer-to-peer file sync tool.
 
 Think of it like AirDrop for Claude sessions, but it works across the internet too.
 
-## Three concepts you need to know
+## Four concepts you need to know
 
-Everything in Karma sync is built on three ideas: **you**, **teams**, and **projects**.
+Everything in Karma sync is built on four ideas: **you**, **teams**, **projects**, and **subscriptions**.
 
 ### 1. You (the Member)
 
@@ -37,29 +37,52 @@ You choose your `user_id` once (your name, no dots). The `machine_tag` is auto-d
 A **team** is a group of members who can see each other's sessions. That's all it is — an access control list.
 
 ```
-Team "backend-crew"
-├── jayant.macbook    (creator)
-├── ayush.laptop
-└── priya.desktop
+Team "backend-crew"  (status: active)
+├── jayant.macbook    (leader — created the team)
+├── ayush.laptop      (active)
+└── priya.desktop     (active)
 ```
 
 Teams don't own data. They don't store anything. They just answer the question: "who should get a copy of my sessions?"
 
 You can be in multiple teams. A freelancer might be in a team with Client A and a separate team with Client B. Sessions shared with Team A are invisible to Team B.
 
-**Creator privilege:** only the person who created the team can remove members. This prevents accidental or unauthorized removals.
+**Leader privilege:** only the team leader (the person who created it) can add members, remove members, share projects, and dissolve the team. This keeps things tidy and prevents accidental changes.
+
+Teams have a simple lifecycle: they're **active** until the leader **dissolves** them. Once dissolved, all Syncthing folders are cleaned up and members are notified automatically.
 
 ### 3. Projects (what gets shared)
 
-You choose which **projects** to share with each team. A project is just a directory you've used Claude Code in — Karma identifies it by its git remote (like `org/repo`).
+You choose which **projects** to share with each team. A project is identified by its **git identity** — that's the git remote URL like `jayantdevkar/claude-karma`. This is how Karma knows "your claude-karma" and "my claude-karma" are the same project, even if they live in different directories on different machines.
 
 ```
 Team "backend-crew" shares:
-├── claude-karma     (jayantdevkar/claude-karma)
-└── api-gateway      (acme/api-gateway)
+├── claude-karma     (git_identity: jayantdevkar/claude-karma)
+└── api-gateway      (git_identity: acme/api-gateway)
 ```
 
 Sharing is per-project, per-team. You might share `claude-karma` with your team but keep `personal-notes` private. You're always in control of what gets shared.
+
+### 4. Subscriptions (how you receive)
+
+When the leader shares a project with a team, every member gets a **subscription** for that project. Think of it like an email subscription — you're automatically signed up, but you decide what to do with it.
+
+Each subscription has a **status** and a **direction**:
+
+| Status | What it means |
+|--------|--------------|
+| **Offered** | The project was just shared. You haven't responded yet. |
+| **Accepted** | You want this project's sessions. They'll start syncing. |
+| **Paused** | Temporarily stopped. Easy to resume later. |
+| **Declined** | You don't want this project. No sessions will sync. |
+
+| Direction | What syncs |
+|-----------|-----------|
+| **Both** | You send your sessions AND receive theirs |
+| **Send** | You share your sessions, but don't receive others' |
+| **Receive** | You get their sessions, but don't share yours |
+
+This means you have fine-grained control. Maybe you want to receive the `api-gateway` project but only send on `claude-karma`. Or maybe you want to pause everything for a week while you're on vacation. It's all up to you.
 
 ## How sessions flow
 
@@ -111,7 +134,7 @@ Karma creates three types of Syncthing folders automatically. You never have to 
 | **Inbox** | Teammate's sessions → you (receive-only) | `karma-out--ayush.laptop--org-repo` |
 | **Metadata** | Team member list & signals (shared) | `karma-meta--backend-crew` |
 
-Notice that "outbox" and "inbox" have the same naming pattern (`karma-out--{member}--{project}`). That's because they're the same folder seen from different sides. Jayant's outbox IS ayush's inbox for that project.
+Notice that "outbox" and "inbox" have the same naming pattern (`karma-out--{member_tag}--{folder_suffix}`). That's because they're the same folder seen from different sides. Jayant's outbox IS ayush's inbox for that project. The `folder_suffix` is derived from the git identity (e.g., `jayantdevkar/claude-karma` becomes `jayantdevkar-claude-karma`).
 
 The **metadata folder** is how members discover each other. Each device writes a small JSON file with its identity. When a new member joins, everyone else picks up their info from the metadata folder automatically — no central coordinator needed.
 
@@ -159,17 +182,19 @@ When jayant leaves Team B, only Team B's devices (bob, charlie) are removed from
 
 ```
 1. Create team              →  Give it a name like "backend-crew"
-2. Get a join code          →  A short code like "backend-crew:jayant:DEVICE-ID"
-3. Share the code           →  Send it to your teammate via Slack, email, anything
+2. Share projects           →  Pick which projects the team should sync
+3. Get a join code          →  A short code your teammates can use to join
+4. Share the code           →  Send it via Slack, email, anything
 ```
 
 ### Joining a team
 
 ```
-1. Enter the join code      →  Paste what your teammate sent you
-2. Devices pair             →  Automatic, encrypted handshake
-3. Pick projects to share   →  Select which local projects to sync
-4. Sessions start flowing   →  Within seconds on LAN, minutes over internet
+1. Get a join code          →  Your teammate generates one from their dashboard
+2. Leader adds you          →  They paste your code on the Team page
+3. Devices pair             →  Automatic, encrypted Syncthing handshake
+4. Accept subscriptions     →  Choose which projects you want, and in which direction
+5. Sessions start flowing   →  Within seconds on LAN, minutes over internet
 ```
 
 ### Day to day
@@ -178,14 +203,13 @@ Nothing. It just works. Karma's watcher runs in the background, packaging new se
 
 ## Settings you can tweak
 
-| Setting | What it does | Default |
-|---------|-------------|---------|
-| **Sync direction** | Send only, receive only, both, or none | Both |
-| **Session limit** | Sync all sessions, recent 100, or recent 10 | All |
-| **Auto-accept members** | Automatically accept new team members | Off |
-| **Project subscription** | Opt out of receiving specific projects | Everything |
+| Setting | Where to set it | What it does |
+|---------|----------------|-------------|
+| **Subscription status** | Per project, per member | Accept, pause, resume, or decline any project subscription |
+| **Sync direction** | Per subscription | Send only, receive only, or both — per project |
+| **Session limit** | Per team | Sync all sessions, recent 100, or recent 10 |
 
-Settings cascade: you can set them per-member, per-team, or per-device. The most specific setting wins.
+The most granular control is at the subscription level. You can be in a team of 10 people sharing 5 projects, and fine-tune exactly which projects you send/receive for.
 
 ## Security model
 
@@ -196,10 +220,11 @@ All transfers use **TLS 1.3** with mutual certificate authentication. Only devic
 Session files are stored unencrypted on disk. Protect your `~/.claude_karma/` directory with standard filesystem permissions (mode 0700 by default).
 
 ### Access control
-- Only the team **creator** can remove members
+- Only the team **leader** can add/remove members, share/remove projects, and dissolve the team
 - Removed members are notified via a removal signal in the metadata folder
 - Removed members auto-leave and their data is cleaned up
-- You can reject (unsubscribe from) specific projects per team
+- You can decline or pause subscriptions to specific projects at any time
+- A device shared across multiple teams is only unpaired when removed from ALL teams
 
 ### What Karma manages for you
 - Device pairing and folder creation
