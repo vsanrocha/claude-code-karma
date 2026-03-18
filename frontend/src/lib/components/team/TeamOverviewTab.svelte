@@ -33,10 +33,11 @@
 		!!memberTag && team.leader_member_tag === memberTag
 	);
 
-	// Derived state
+	// Derived state (exclude self from member counts)
 	let members = $derived(team.members ?? []);
+	let others = $derived(members.filter(m => m.member_tag !== memberTag));
 	let projects = $derived(team.projects ?? []);
-	let activeCount = $derived(members.filter((m) => m.status === 'active').length);
+	let activeCount = $derived(others.filter((m) => m.status === 'active').length);
 	let sharedProjects = $derived(projects.filter((p) => p.status === 'shared').length);
 
 	// Format created_at date
@@ -57,7 +58,7 @@
 	let stats = $derived<StatItem[]>([
 		{
 			title: 'Members',
-			value: `${activeCount}/${members.length}`,
+			value: `${activeCount}/${others.length}`,
 			description: 'active',
 			icon: Users,
 			color: 'green'
@@ -92,7 +93,7 @@
 
 	<!-- Getting Started Guide (leaders of new teams only) -->
 	<GettingStartedBanner
-		memberCount={members.length}
+		memberCount={others.length}
 		projectCount={sharedProjects}
 		{isLeader}
 		{teamName}

@@ -44,7 +44,7 @@
 
 	// Step completion
 	let projectsDone = $derived(projectCount > 0);
-	let membersDone = $derived(memberCount > 1);
+	let membersDone = $derived(memberCount > 0);
 	let allDone = $derived(projectsDone && membersDone);
 
 	// Determine which step is "active" (first incomplete)

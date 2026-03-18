@@ -25,13 +25,13 @@
 	let membersLoaded = $state(false);
 	let membersLoading = $state(true);
 
-	// Total members from DB (includes self) — more accurate than device count
+	// Total teammates (excluding self)
 	let totalMembers = $derived.by(() => {
 		if (!teamName || !status?.teams) return 0;
-		// v4: teams is an array of SyncTeam; v3: was Record<string, entry>
 		const teamsArr = Array.isArray(status.teams) ? status.teams : [];
 		const team = teamsArr.find((t: { name: string }) => t.name === teamName) as { member_count?: number; members?: unknown[] } | undefined;
-		return team?.member_count ?? team?.members?.length ?? 0;
+		const total = team?.member_count ?? (team?.members as any[])?.length ?? 0;
+		return Math.max(0, total - 1); // exclude self
 	});
 
 	// ── Per-Project Sync Status ──────────────────────────────────────────────
@@ -74,8 +74,8 @@
 				const devData = await devicesRes.json();
 				const devices = devData.devices ?? [];
 				const remoteDevices = devices.filter((d: { is_self?: boolean }) => !d.is_self);
-				// +1 for self (always online)
-				connectedMembers = remoteDevices.filter((d: { connected?: boolean }) => d.connected).length + 1;
+				// Count only connected teammates (exclude self)
+				connectedMembers = remoteDevices.filter((d: { connected?: boolean }) => d.connected).length;
 			}
 		} catch {
 			// Non-critical
@@ -337,7 +337,7 @@
 			<a href={teamHref} class="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--bg-subtle)] p-4 text-center no-underline hover:border-[var(--accent)]/40 transition-colors">
 				<Users size={16} class="mx-auto text-[var(--text-muted)] mb-1.5" />
 				<p class="text-lg font-semibold text-[var(--text-primary)]">{connectedMembers}/{totalMembers}</p>
-				<p class="text-[11px] text-[var(--text-muted)]">Members Online</p>
+				<p class="text-[11px] text-[var(--text-muted)]">Teammates Online</p>
 			</a>
 			<a href={teamHref} class="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--bg-subtle)] p-4 text-center no-underline hover:border-[var(--accent)]/40 transition-colors">
 				<FolderGit2 size={16} class="mx-auto text-[var(--text-muted)] mb-1.5" />

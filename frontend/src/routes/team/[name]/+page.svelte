@@ -219,7 +219,7 @@
 	<Tabs.Root bind:value={activeTab} class="space-y-6">
 		<Tabs.List class="flex gap-1 p-1 bg-[var(--bg-subtle)] border border-[var(--border)] rounded-lg w-fit mx-auto max-w-full overflow-x-auto">
 			<TabsTrigger value="overview" icon={LayoutDashboard}>Overview</TabsTrigger>
-			<TabsTrigger value="members" icon={Contact}>Members ({members.length})</TabsTrigger>
+			<TabsTrigger value="members" icon={Contact}>Members ({members.filter(m => m.member_tag !== memberTag).length})</TabsTrigger>
 			<TabsTrigger value="projects" icon={FolderSync}>
 				Projects ({projects.length})
 				{#if pendingCount > 0}

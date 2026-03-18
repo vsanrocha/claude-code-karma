@@ -3,13 +3,14 @@
 	import type { SyncTeam } from '$lib/api-types';
 	import { getTeamMemberHexColor } from '$lib/utils';
 
-	let { team, pendingCount = 0 }: { team: SyncTeam; pendingCount?: number } = $props();
+	let { team, pendingCount = 0, myMemberTag = '' }: { team: SyncTeam; pendingCount?: number; myMemberTag?: string } = $props();
 
 	let members = $derived(team.members ?? []);
+	let others = $derived(members.filter(m => m.member_tag !== myMemberTag));
 	let projects = $derived(team.projects ?? []);
-	let memberCount = $derived(members.length || team.member_count || 0);
+	let memberCount = $derived(others.length || Math.max(0, (team.member_count || 0) - 1));
 	let projectCount = $derived(projects.length || team.project_count || 0);
-	let activeCount = $derived(members.filter((m) => m.status === 'active').length);
+	let activeCount = $derived(others.filter((m) => m.status === 'active').length);
 
 	function memberDisplayName(member: { member_tag: string; user_id?: string }): string {
 		return member.user_id || member.member_tag;

@@ -54,9 +54,17 @@
 		}
 	});
 
-	// Aggregate stats across all teams
-	let totalMembers = $derived(teams.reduce((sum, t) => sum + (t.members?.length ?? t.member_count ?? 0), 0));
-	let activeMembers = $derived(teams.reduce((sum, t) => sum + (t.members?.filter(m => m.status === 'active').length ?? 0), 0));
+	// Current user's member tag (to exclude self from counts)
+	let myTag = $derived(data.syncStatus?.member_tag);
+
+	// Aggregate stats across all teams (excluding self)
+	let totalMembers = $derived(teams.reduce((sum, t) => {
+		const others = (t.members ?? []).filter(m => m.member_tag !== myTag);
+		return sum + (others.length || Math.max(0, (t.member_count ?? 0) - 1));
+	}, 0));
+	let activeMembers = $derived(teams.reduce((sum, t) => {
+		return sum + (t.members ?? []).filter(m => m.member_tag !== myTag && m.status === 'active').length;
+	}, 0));
 	let totalProjects = $derived(teams.reduce((sum, t) => sum + (t.projects?.length ?? t.project_count ?? 0), 0));
 
 	let stats = $derived<StatItem[]>([
@@ -242,7 +250,7 @@
 		<!-- State 3: Has teams -->
 		<div class="space-y-2" use:listNavigation>
 			{#each teams as team (team.name)}
-				<TeamCard {team} pendingCount={data.pendingByTeam?.[team.name] ?? 0} />
+				<TeamCard {team} pendingCount={data.pendingByTeam?.[team.name] ?? 0} myMemberTag={myTag ?? ''} />
 			{/each}
 		</div>
 	{/if}
