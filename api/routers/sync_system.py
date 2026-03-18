@@ -1,101 +1,149 @@
-"""Sync system endpoints — init, status, reset, detect."""
+"""Sync system endpoints — status, initialization, reconciliation, reset."""
+from __future__ import annotations
 
 import logging
 import shutil
 import sqlite3
 import subprocess
-from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 
-from db.sync_queries import list_teams
-from schemas import InitRequest, ResetOptions
-import services.sync_identity as _sid
-from services.sync_identity import (
-    reset_proxy,
-    validate_user_id,
-    ALLOWED_PROJECT_NAME,
+from routers.sync_deps import (
+    get_conn,
+    get_optional_config,
+    make_reconciliation_service,
+    make_repos,
+    require_config,
+    validate_name,
 )
-from services.syncthing_proxy import SyncthingNotRunning, run_sync
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/sync", tags=["sync"])
+router = APIRouter(prefix="/sync", tags=["sync-system"])
 
 
-@router.post("/init")
-async def sync_init(req: InitRequest) -> Any:
-    """Initialize Karma sync configuration."""
-    validate_user_id(req.user_id)
-    if req.backend != "syncthing":
-        raise HTTPException(400, "Only 'syncthing' backend is supported")
-    from karma.config import SyncConfig, SyncthingSettings
+# --- Request schemas -------------------------------------------------------
 
-    device_id: Optional[str] = None
+class InitRequest(BaseModel):
+    user_id: str
+    backend: str = "syncthing"
 
-    if req.backend == "syncthing":
-        proxy = _sid.get_proxy()
-        try:
-            info = await run_sync(proxy.detect)
-        except SyncthingNotRunning:
-            raise HTTPException(503, "Syncthing is not running")
 
-        if not info.get("running"):
-            raise HTTPException(503, "Syncthing is not running")
+class ResetOptions(BaseModel):
+    uninstall_syncthing: bool = False
 
-        from karma.syncthing import read_local_api_key
 
-        api_key = await run_sync(read_local_api_key)
-        device_id = info.get("device_id")
+# --- Dependencies ----------------------------------------------------------
 
-        syncthing_settings = SyncthingSettings(
-            api_key=api_key,
-            device_id=device_id,
-        )
-        config = SyncConfig(user_id=req.user_id, syncthing=syncthing_settings)
-    else:
-        config = SyncConfig(user_id=req.user_id)
+async def get_recon_svc(config=Depends(require_config)):
+    return make_reconciliation_service(config)
 
-    await run_sync(config.save)
 
-    return {
-        "ok": True,
-        "user_id": config.user_id,
-        "machine_id": config.machine_id,
-        "device_id": device_id,
-    }
-
+# --- Endpoints -------------------------------------------------------------
 
 @router.get("/status")
-async def sync_status():
-    """Get sync configuration and status."""
-    config = await run_sync(_sid._load_identity)
+async def sync_status(
+    conn: sqlite3.Connection = Depends(get_conn),
+    config=Depends(get_optional_config),
+):
+    """Sync configuration and team summary."""
     if config is None:
         return {"configured": False}
 
-    conn = _sid._get_sync_conn()
-    teams_list = list_teams(conn)
-    teams = {}
-    for t in teams_list:
-        teams[t["name"]] = {
-            "backend": t["backend"],
-            "project_count": t["project_count"],
-            "member_count": t["member_count"],
-        }
+    repos = make_repos()
+    teams = repos["teams"].list_all(conn)
 
     return {
         "configured": True,
         "user_id": config.user_id,
         "machine_id": config.machine_id,
+        "member_tag": config.member_tag,
         "device_id": config.syncthing.device_id if config.syncthing else None,
-        "teams": teams,
+        "teams": {
+            t.name: {"status": t.status.value, "leader": t.leader_member_tag}
+            for t in teams
+        },
     }
 
 
+@router.post("/init")
+async def sync_init(req: InitRequest):
+    """Initialize Karma sync — detects Syncthing and saves config."""
+    validate_name(req.user_id, "user_id")
+    if req.backend != "syncthing":
+        raise HTTPException(400, "Only 'syncthing' backend is supported")
+
+    from karma.config import SyncConfig, SyncthingSettings
+    from karma.syncthing import read_local_api_key
+    from services.syncthing.client import SyncthingClient
+
+    api_key = read_local_api_key()
+    if not api_key:
+        raise HTTPException(
+            503, "Cannot read Syncthing API key. Is Syncthing installed?"
+        )
+
+    client = SyncthingClient(api_url="http://localhost:8384", api_key=api_key)
+    try:
+        status = await client.get_system_status()
+    except Exception:
+        raise HTTPException(503, "Syncthing is not running or unreachable")
+
+    device_id = status.get("myID")
+    syncthing_settings = SyncthingSettings(api_key=api_key, device_id=device_id)
+    config = SyncConfig(user_id=req.user_id, syncthing=syncthing_settings)
+    config.save()
+
+    return {
+        "ok": True,
+        "user_id": config.user_id,
+        "machine_id": config.machine_id,
+        "member_tag": config.member_tag,
+        "device_id": device_id,
+    }
+
+
+@router.post("/reconcile")
+async def trigger_reconciliation(
+    conn: sqlite3.Connection = Depends(get_conn),
+    svc=Depends(get_recon_svc),
+):
+    """Trigger a manual 3-phase reconciliation cycle."""
+    try:
+        await svc.run_cycle(conn)
+    except Exception as e:
+        logger.warning("Manual reconciliation failed: %s", e)
+        raise HTTPException(500, f"Reconciliation failed: {e}")
+    return {"ok": True}
+
+
+@router.get("/detect")
+async def sync_detect():
+    """Detect whether Syncthing is installed and running."""
+    try:
+        from karma.syncthing import read_local_api_key
+        from services.syncthing.client import SyncthingClient
+
+        api_key = read_local_api_key()
+        if not api_key:
+            return {"running": False, "reason": "no_api_key"}
+
+        client = SyncthingClient(api_url="http://localhost:8384", api_key=api_key)
+        status = await client.get_system_status()
+        return {
+            "running": True,
+            "device_id": status.get("myID"),
+            "version": status.get("version"),
+        }
+    except Exception:
+        return {"running": False}
+
+
 @router.post("/reset")
-async def sync_reset(options: Optional[ResetOptions] = None) -> Any:
-    """Full sync teardown: clean Syncthing config, kill daemon, delete files & tables."""
+async def sync_reset(options: Optional[ResetOptions] = None):
+    """Full sync teardown — clean Syncthing, delete files, clear DB."""
     from karma.config import SYNC_CONFIG_PATH, KARMA_BASE
 
     if options is None:
@@ -103,192 +151,97 @@ async def sync_reset(options: Optional[ResetOptions] = None) -> Any:
 
     steps: dict[str, Any] = {}
 
-    # 1. (Watcher removed — sync is now manual via sync-now)
-
-    # 2. Clean Syncthing config (remove karma folders & team devices) then shut it down
+    # 1. Clean Syncthing config (best-effort)
     try:
-        proxy = _sid.get_proxy()
-        # Remove all karma-* shared folders
-        try:
-            result = await run_sync(proxy.remove_karma_folders)
-            steps["syncthing_folders_removed"] = result.get("removed", [])
-        except Exception as e:
-            steps["syncthing_folders_removed"] = f"error: {e}"
+        from karma.syncthing import read_local_api_key
+        from services.syncthing.client import SyncthingClient
 
-        # Remove all non-self devices (team members)
-        try:
-            result = await run_sync(proxy.remove_all_non_self_devices)
-            steps["syncthing_devices_removed"] = result.get("removed", [])
-        except Exception as e:
-            steps["syncthing_devices_removed"] = f"error: {e}"
+        api_key = read_local_api_key()
+        if api_key:
+            client = SyncthingClient(
+                api_url="http://localhost:8384", api_key=api_key
+            )
+            # Remove all karma-* folders
+            try:
+                folders = await client.get_config_folders()
+                removed = []
+                for f in folders:
+                    if f.get("id", "").startswith("karma-"):
+                        await client.delete_config_folder(f["id"])
+                        removed.append(f["id"])
+                steps["folders_removed"] = removed
+            except Exception as e:
+                steps["folders_removed"] = f"error: {e}"
 
-        # Shut down the Syncthing daemon
-        try:
-            result = await run_sync(proxy.shutdown)
-            steps["syncthing_shutdown"] = result.get("ok", False)
-        except Exception as e:
-            steps["syncthing_shutdown"] = f"error: {e}"
+            # Remove all non-self devices
+            try:
+                sys_status = await client.get_system_status()
+                my_id = sys_status.get("myID", "")
+                devices = await client.get_config_devices()
+                removed_devs = []
+                for d in devices:
+                    if d.get("deviceID") != my_id:
+                        await client.delete_config_device(d["deviceID"])
+                        removed_devs.append(d["deviceID"])
+                steps["devices_removed"] = removed_devs
+            except Exception as e:
+                steps["devices_removed"] = f"error: {e}"
     except Exception:
-        steps["syncthing_cleanup"] = "skipped (not running)"
+        steps["syncthing_cleanup"] = "skipped"
 
-    # 3. Delete remote session files + handshake + metadata dirs
-    remote_dir = KARMA_BASE / "remote-sessions"
-    if remote_dir.exists():
-        shutil.rmtree(remote_dir, ignore_errors=True)
-        steps["remote_sessions_deleted"] = True
-    else:
-        steps["remote_sessions_deleted"] = False
+    # 2. Delete filesystem dirs
+    for dir_name in ["remote-sessions", "handshakes", "metadata-folders"]:
+        d = KARMA_BASE / dir_name
+        if d.exists():
+            shutil.rmtree(d, ignore_errors=True)
+            steps[f"{dir_name.replace('-', '_')}_deleted"] = True
 
-    handshakes_dir = KARMA_BASE / "handshakes"
-    if handshakes_dir.exists():
-        shutil.rmtree(handshakes_dir, ignore_errors=True)
-        steps["handshakes_deleted"] = True
-
-    metadata_dir = KARMA_BASE / "metadata-folders"
-    if metadata_dir.exists():
-        shutil.rmtree(metadata_dir, ignore_errors=True)
-        steps["metadata_folders_deleted"] = True
-
-    # 4. Delete sync config file + stale DB files from v1
+    # 3. Delete sync config
     if SYNC_CONFIG_PATH.exists():
         SYNC_CONFIG_PATH.unlink()
         steps["config_deleted"] = True
-    else:
-        steps["config_deleted"] = False
 
-    stale_dbs_removed = []
-    for stale_name in ["sync.db", "index.db", "karma.db", "sessions.db", "workflow.db"]:
-        stale_path = KARMA_BASE / stale_name
-        if stale_path.exists():
-            stale_path.unlink(missing_ok=True)
-            stale_dbs_removed.append(stale_name)
-    if stale_dbs_removed:
-        steps["stale_dbs_deleted"] = stale_dbs_removed
-
-    # 5. Clear all sync tables + orphan remote sessions
-    conn = _sid._get_sync_conn()
+    # 4. Clear v4 sync tables
+    conn = get_conn()
     tables_cleared = []
     for table in [
-        "sync_rejected_folders",  # persistent folder rejections (v2)
-        "sync_settings", "sync_removed_members",  # policy/removal state
-        "sync_events", "sync_team_projects", "sync_members", "sync_teams",
+        "sync_subscriptions",
+        "sync_projects",
+        "sync_removed_members",
+        "sync_events",
+        "sync_members",
+        "sync_teams",
     ]:
         try:
-            conn.execute(f"DELETE FROM {table}")  # noqa: S608 — table names are hardcoded
+            conn.execute(f"DELETE FROM {table}")  # noqa: S608
             tables_cleared.append(table)
         except sqlite3.OperationalError:
-            pass  # table doesn't exist yet
-
-    # Clean up remote session rows — the files on disk were already deleted
-    # in step 3, so these would be orphans after reset.
-    try:
-        cursor = conn.execute("DELETE FROM sessions WHERE source = 'remote'")
-        remote_deleted = cursor.rowcount
-        steps["remote_sessions_db_deleted"] = remote_deleted
-    except sqlite3.OperationalError:
-        steps["remote_sessions_db_deleted"] = 0
-
-    # Clean up orphaned project rows that have no remaining sessions.
-    # After deleting remote sessions above, remote-only projects become orphans
-    # in the projects table and keep showing up in the project listing.
-    orphan_projects_deleted = []
-    try:
-        orphan_rows = conn.execute(
-            "SELECT encoded_name FROM projects "
-            "WHERE encoded_name NOT IN (SELECT DISTINCT project_encoded_name FROM sessions)"
-        ).fetchall()
-        for row in orphan_rows:
-            orphan_projects_deleted.append(row[0])
-        if orphan_projects_deleted:
-            conn.execute(
-                "DELETE FROM projects WHERE encoded_name IN ({})".format(
-                    ",".join("?" for _ in orphan_projects_deleted)
-                ),
-                orphan_projects_deleted,
-            )
-        steps["orphan_projects_deleted"] = orphan_projects_deleted
-    except sqlite3.OperationalError:
-        steps["orphan_projects_deleted"] = []
-
+            pass
     conn.commit()
     steps["tables_cleared"] = tables_cleared
 
-    # Clean up title cache files for deleted orphan projects
-    titles_dir = KARMA_BASE / "cache" / "titles"
-    titles_cleaned = []
-    if titles_dir.is_dir():
-        for encoded_name in orphan_projects_deleted:
-            cache_file = titles_dir / f"{encoded_name}.json"
-            if cache_file.is_file():
-                cache_file.unlink()
-                titles_cleaned.append(encoded_name)
-    if titles_cleaned:
-        steps["title_caches_deleted"] = titles_cleaned
-
-    # 6. Stop brew service FIRST to deregister launchd plist (prevents respawn),
-    #    then kill any remaining Syncthing processes.
+    # 5. Stop Syncthing service (best-effort)
     try:
-        r = subprocess.run(
+        subprocess.run(
             ["brew", "services", "stop", "syncthing"],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True,
+            timeout=15,
         )
-        steps["brew_service_stopped"] = r.returncode == 0
-    except Exception as e:
-        logger.debug("brew services stop failed: %s", e)
-        steps["brew_service_stopped"] = False
+        steps["service_stopped"] = True
+    except Exception:
+        steps["service_stopped"] = False
 
-    try:
-        subprocess.run(["pkill", "syncthing"], capture_output=True, timeout=5)
-        steps["process_killed"] = True
-    except Exception as e:
-        logger.debug("pkill syncthing failed: %s", e)
-        steps["process_killed"] = False
-
-    # 7. Optionally full uninstall: uninstall binary, remove config dirs
+    # 6. Optionally uninstall Syncthing
     if options.uninstall_syncthing:
-        # Uninstall via brew
         try:
             r = subprocess.run(
                 ["brew", "uninstall", "syncthing"],
-                capture_output=True, text=True, timeout=30,
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
             steps["brew_uninstalled"] = r.returncode == 0
-        except Exception as e:
-            logger.debug("brew uninstall syncthing failed: %s", e)
+        except Exception:
             steps["brew_uninstalled"] = False
 
-        # Remove Syncthing config directories
-        st_config_dirs = [
-            Path.home() / "Library" / "Application Support" / "Syncthing",
-            Path.home() / ".local" / "share" / "syncthing",
-            Path.home() / ".config" / "syncthing",
-        ]
-        removed_dirs = []
-        for d in st_config_dirs:
-            if d.exists():
-                shutil.rmtree(d, ignore_errors=True)
-                removed_dirs.append(str(d))
-        steps["syncthing_config_removed"] = removed_dirs
-
-    # 8. Reset proxy singleton and invalidate in-memory caches
-    reset_proxy()
-
-    try:
-        from services.remote_sessions import invalidate_caches
-        invalidate_caches()
-        steps["caches_invalidated"] = True
-    except Exception as e:
-        logger.debug("Cache invalidation failed: %s", e)
-        steps["caches_invalidated"] = False
-
     return {"ok": True, "steps": steps}
-
-
-@router.get("/detect")
-async def sync_detect() -> Any:
-    """Detect whether Syncthing is installed and running."""
-    proxy = _sid.get_proxy()
-    try:
-        return await run_sync(proxy.detect)
-    except SyncthingNotRunning:
-        raise HTTPException(status_code=503, detail="Syncthing is not running")
