@@ -73,6 +73,7 @@ from utils import (
     list_all_projects,
     normalize_timezone,
     parse_timestamp_range,
+    resolve_git_remote_url,
     resolve_git_root,
 )
 
@@ -399,6 +400,7 @@ def list_projects(request: Request):
                         encoded_name = row["encoded_name"]
                         is_git = False
                         git_root = None
+                        git_remote = None
                         is_nested = False
                         exists = False
                         if path:
@@ -409,6 +411,8 @@ def list_projects(request: Request):
                                 git_root = resolve_git_root(path)
                                 if git_root is not None:
                                     is_nested = p.resolve() != Path(git_root).resolve()
+                                if is_git:
+                                    git_remote = resolve_git_remote_url(path)
                         summaries.append(
                             ProjectSummary(
                                 path=path,
@@ -421,6 +425,7 @@ def list_projects(request: Request):
                                 is_git_repository=is_git,
                                 git_root_path=git_root,
                                 is_nested_project=is_nested,
+                                git_remote_url=git_remote,
                                 latest_session_time=row.get("last_activity"),
                             )
                         )
@@ -442,6 +447,7 @@ def list_projects(request: Request):
             is_git_repository=p.is_git_repository,
             git_root_path=p.git_root_path,
             is_nested_project=p.is_nested_project,
+            git_remote_url=resolve_git_remote_url(p.path) if p.is_git_repository and p.exists else None,
             latest_session_time=get_latest_session_time(p),
         )
         for p in projects

@@ -372,6 +372,9 @@ class ProjectSummary(BaseModel):
     is_nested_project: bool = Field(
         default=False, description="True if project is inside a git repo but not at the root"
     )
+    git_remote_url: Optional[str] = Field(
+        default=None, description="Git remote 'origin' URL — machine-independent project identity"
+    )
     latest_session_time: Optional[datetime] = Field(
         default=None, description="Start time of the most recent session"
     )

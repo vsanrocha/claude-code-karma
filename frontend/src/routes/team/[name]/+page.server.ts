@@ -13,6 +13,7 @@ interface ProjectSummary {
 	slug?: string;
 	display_name?: string;
 	session_count: number;
+	git_remote_url?: string;
 }
 
 export const load: PageServerLoad = async ({ fetch, params }) => {
@@ -47,7 +48,8 @@ export const load: PageServerLoad = async ({ fetch, params }) => {
 		allProjects: allProjects.map((p) => ({
 			encoded_name: p.encoded_name,
 			name: p.display_name || p.slug || p.encoded_name,
-			path: p.path
+			path: p.path,
+			git_remote_url: p.git_remote_url ?? null
 		}))
 	};
 };

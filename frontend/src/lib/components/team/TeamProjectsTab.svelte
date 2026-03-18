@@ -23,7 +23,7 @@
 		subscriptions: SyncSubscription[];
 		memberTag: string | undefined;
 		isLeader?: boolean;
-		allProjects: { encoded_name: string; name: string; path: string }[];
+		allProjects: { encoded_name: string; name: string; path: string; git_remote_url?: string | null }[];
 		onrefresh: () => void;
 	}
 
@@ -61,14 +61,23 @@
 		);
 	}
 
-	// Look up human-readable project info from allProjects
-	function getProjectInfo(project: SyncTeamProject): { displayName: string; path: string } {
-		const key = project.encoded_name || project.git_identity;
-		const match = allProjects.find(p => p.encoded_name === key);
-		if (match) {
-			return { displayName: match.name, path: match.path };
+	// Look up human-readable project info from allProjects.
+	// Matches by git_identity (remote URL) first for cross-machine matching,
+	// then falls back to encoded_name for same-machine or non-git projects.
+	function getProjectInfo(project: SyncTeamProject): { displayName: string; path: string; localEncodedName?: string } {
+		const gitId = project.git_identity;
+		// Try matching by git remote URL (works across machines)
+		const remoteMatch = allProjects.find(p => p.git_remote_url && p.git_remote_url === gitId);
+		if (remoteMatch) {
+			return { displayName: remoteMatch.name, path: remoteMatch.path, localEncodedName: remoteMatch.encoded_name };
 		}
-		// Fallback: extract last meaningful segment from encoded name
+		// Try matching by encoded_name (same machine)
+		const key = project.encoded_name || gitId;
+		const nameMatch = allProjects.find(p => p.encoded_name === key);
+		if (nameMatch) {
+			return { displayName: nameMatch.name, path: nameMatch.path, localEncodedName: nameMatch.encoded_name };
+		}
+		// Fallback: extract last meaningful segment
 		const segments = key.replace(/^-/, '').split('-');
 		const name = segments.length >= 2
 			? segments.slice(-2).join('-')
@@ -329,9 +338,9 @@
 							<FolderSync size={15} class="text-[var(--accent)]" />
 						</div>
 						<div class="min-w-0">
-							{#if project.encoded_name}
+							{#if info.localEncodedName}
 								<a
-									href="/projects/{project.encoded_name}"
+									href="/projects/{info.localEncodedName}"
 									class="text-sm font-semibold text-[var(--text-primary)] hover:text-[var(--accent)] transition-colors truncate block"
 								>
 									{info.displayName}

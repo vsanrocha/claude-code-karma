@@ -7,6 +7,7 @@
 		encoded_name: string;
 		name: string;
 		path?: string;
+		git_remote_url?: string | null;
 	}
 
 	let {
@@ -50,13 +51,16 @@
 			const results = await Promise.all(
 				[...selected].map(async (encodedName) => {
 					const project = allProjects.find((p) => p.encoded_name === encodedName);
+					// Use git remote URL as git_identity (machine-independent);
+					// fall back to encoded_name for non-git projects
+					const gitIdentity = project?.git_remote_url || encodedName;
 					const res = await fetch(
 						`${API_BASE}/sync/teams/${encodeURIComponent(teamName)}/projects`,
 						{
 							method: 'POST',
 							headers: { 'Content-Type': 'application/json' },
 							body: JSON.stringify({
-								git_identity: encodedName,
+								git_identity: gitIdentity,
 								encoded_name: encodedName
 							})
 						}
