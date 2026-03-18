@@ -1,7 +1,5 @@
 <script lang="ts">
 	import { API_BASE } from '$lib/config';
-	import { invalidateAll } from '$app/navigation';
-	import { onMount, onDestroy } from 'svelte';
 	import {
 		FolderSync,
 		Plus,
@@ -12,7 +10,9 @@
 		X,
 		ArrowUpDown,
 		ArrowUp,
-		ArrowDown
+		ArrowDown,
+		Check,
+		Inbox
 	} from 'lucide-svelte';
 	import type { SyncTeamProject, SyncSubscription } from '$lib/api-types';
 	import AddProjectDialog from './AddProjectDialog.svelte';
@@ -24,7 +24,6 @@
 		memberTag: string | undefined;
 		isLeader?: boolean;
 		allProjects: { encoded_name: string; name: string; path: string }[];
-		teamMemberTags?: string[];
 		onrefresh: () => void;
 	}
 
@@ -35,7 +34,6 @@
 		memberTag,
 		isLeader = false,
 		allProjects,
-		teamMemberTags = [],
 		onrefresh
 	}: Props = $props();
 
@@ -45,6 +43,16 @@
 	let subscriptionActing = $state<string | null>(null);
 	let directionActing = $state<string | null>(null);
 
+	// Track selected direction per invitation (before accepting)
+	let selectedDirections = $state<Record<string, string>>({});
+
+	// Direction options with human-readable descriptions
+	const DIRECTION_OPTIONS = [
+		{ value: 'both', label: 'Both ways', desc: 'Send your sessions & receive theirs', icon: ArrowUpDown },
+		{ value: 'send', label: 'Send only', desc: 'Share your sessions with the team', icon: ArrowUp },
+		{ value: 'receive', label: 'Receive only', desc: 'Get team sessions without sharing', icon: ArrowDown }
+	] as const;
+
 	// Get the current user's subscription for a project
 	function getMySubscription(gitIdentity: string): SyncSubscription | undefined {
 		if (!memberTag) return undefined;
@@ -53,9 +61,27 @@
 		);
 	}
 
-	function getProjectDisplayName(project: SyncTeamProject): string {
-		if (project.encoded_name) return project.encoded_name;
-		return project.git_identity;
+	// Look up human-readable project info from allProjects
+	function getProjectInfo(project: SyncTeamProject): { displayName: string; path: string } {
+		const key = project.encoded_name || project.git_identity;
+		const match = allProjects.find(p => p.encoded_name === key);
+		if (match) {
+			return { displayName: match.name, path: match.path };
+		}
+		// Fallback: extract last meaningful segment from encoded name
+		const segments = key.replace(/^-/, '').split('-');
+		const name = segments.length >= 2
+			? segments.slice(-2).join('-')
+			: segments[segments.length - 1] || key;
+		return { displayName: name, path: key };
+	}
+
+	function getSelectedDir(gitIdentity: string): string {
+		return selectedDirections[gitIdentity] ?? 'both';
+	}
+
+	function selectDir(gitIdentity: string, dir: string) {
+		selectedDirections = { ...selectedDirections, [gitIdentity]: dir };
 	}
 
 	function directionIcon(direction: string) {
@@ -68,13 +94,28 @@
 
 	function directionLabel(direction: string): string {
 		switch (direction) {
-			case 'send': return 'Send';
-			case 'receive': return 'Receive';
-			default: return 'Both';
+			case 'send': return 'Send only';
+			case 'receive': return 'Receive only';
+			default: return 'Both ways';
 		}
 	}
 
 	let sharedProjectIdentities = $derived(projects.map((p) => p.git_identity));
+
+	// Split projects: offered invitations vs everything else
+	let offeredProjects = $derived(
+		projects.filter(p => {
+			const sub = getMySubscription(p.git_identity);
+			return sub?.status === 'offered';
+		})
+	);
+
+	let activeProjects = $derived(
+		projects.filter(p => {
+			const sub = getMySubscription(p.git_identity);
+			return sub?.status !== 'offered';
+		})
+	);
 
 	async function handleRemoveProject(gitIdentity: string) {
 		removeProjectError = null;
@@ -141,161 +182,120 @@
 		const idx = order.indexOf(current);
 		return order[(idx + 1) % order.length];
 	}
-
-	// --- Pending folders ---
-	interface PendingFolder {
-		folder_id: string;
-		label: string;
-		from_device: string;
-		from_member: string | null;
-		offered_at: string;
-		folder_type: string;
-		project_name: string;
-	}
-
-	let pendingFolders = $state<PendingFolder[]>([]);
-	let pendingLoading = $state(true);
-	let acceptingId = $state<string | null>(null);
-	let rejectingId = $state<string | null>(null);
-	let acceptingAll = $state(false);
-
-	async function loadPendingFolders() {
-		try {
-			const res = await fetch(`${API_BASE}/sync/pending`);
-			if (res.ok) {
-				const data = await res.json();
-				pendingFolders = (data.folders ?? [])
-					.filter((f: any) => f.folder_type === 'out')
-					.filter((f: any) => {
-						if (!teamMemberTags || teamMemberTags.length === 0) return true;
-						return f.from_member && teamMemberTags.includes(f.from_member);
-					})
-					.map((f: any) => {
-						const parts = f.folder_id.split('--');
-						const suffix = parts.length >= 3 ? parts.slice(2).join('--') : f.folder_id;
-						return { ...f, project_name: suffix };
-					});
-			}
-		} catch { /* non-critical */ }
-		finally { pendingLoading = false; }
-	}
-
-	async function acceptFolder(folder: PendingFolder) {
-		acceptingId = folder.folder_id;
-		try {
-			const res = await fetch(`${API_BASE}/sync/pending/accept/${encodeURIComponent(folder.folder_id)}`, {
-				method: 'POST'
-			});
-			if (res.ok) {
-				await loadPendingFolders();
-				onrefresh();
-			}
-		} catch { /* */ }
-		finally { acceptingId = null; }
-	}
-
-	async function rejectFolder(folder: PendingFolder) {
-		rejectingId = folder.folder_id;
-		try {
-			const res = await fetch(`${API_BASE}/sync/pending/reject/${encodeURIComponent(folder.folder_id)}`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ device_id: folder.from_device })
-			});
-			if (res.ok) {
-				await loadPendingFolders();
-			}
-		} catch { /* */ }
-		finally { rejectingId = null; }
-	}
-
-	async function acceptFolderQuiet(folder: PendingFolder) {
-		try {
-			await fetch(`${API_BASE}/sync/pending/accept/${encodeURIComponent(folder.folder_id)}`, {
-				method: 'POST'
-			});
-		} catch { /* */ }
-	}
-
-	async function acceptAll() {
-		acceptingAll = true;
-		try {
-			await Promise.all(pendingFolders.map(f => acceptFolderQuiet(f)));
-			await loadPendingFolders();
-			onrefresh();
-		} finally {
-			acceptingAll = false;
-		}
-	}
-
-	let pollInterval: ReturnType<typeof setInterval> | null = null;
-
-	onMount(() => {
-		loadPendingFolders();
-		pollInterval = setInterval(loadPendingFolders, 15000);
-	});
-
-	onDestroy(() => {
-		if (pollInterval) clearInterval(pollInterval);
-	});
 </script>
 
-<div class="space-y-4">
-	<!-- Pending folder invitations -->
-	{#if pendingFolders.length > 0}
-		<div class="space-y-3 mb-6">
-			<div class="flex items-center gap-3">
-				<span class="text-sm font-semibold text-[var(--warning)]">Pending Invitations</span>
-				<div class="flex-1 h-px bg-[var(--warning)]/15"></div>
-				<button
-					onclick={acceptAll}
-					disabled={acceptingAll}
-					class="px-3 py-1.5 text-xs font-medium rounded-[var(--radius-md)] bg-[var(--success)]/10 text-[var(--success)] border border-[var(--success)]/20 hover:bg-[var(--success)]/15 transition-colors disabled:opacity-50"
-				>
-					{#if acceptingAll}
-						<Loader2 size={12} class="animate-spin inline mr-1" />
-					{/if}
-					Accept All
-				</button>
+<div class="space-y-6">
+	<!-- ═══════════════════════════════════════════════════════
+	     Pending Invitations — prominent cards for offered subs
+	     ═══════════════════════════════════════════════════════ -->
+	{#if offeredProjects.length > 0}
+		<section class="space-y-3">
+			<div class="flex items-center gap-2.5">
+				<div class="w-6 h-6 rounded-md bg-[var(--warning)]/12 flex items-center justify-center">
+					<Inbox size={13} class="text-[var(--warning)]" />
+				</div>
+				<h3 class="text-sm font-semibold text-[var(--text-primary)]">
+					Pending Invitation{offeredProjects.length !== 1 ? 's' : ''}
+				</h3>
+				<span class="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-[var(--warning)] text-white">
+					{offeredProjects.length}
+				</span>
 			</div>
 
-			{#each pendingFolders as folder (folder.folder_id)}
-				<div class="flex items-center gap-3 p-3.5 rounded-[var(--radius-lg)] border border-[var(--warning)]/15 bg-[var(--warning)]/[0.02]">
-					<div class="w-8 h-8 rounded-lg bg-[var(--accent)]/10 flex items-center justify-center shrink-0">
-						<FolderSync size={15} class="text-[var(--accent)]" />
+			{#each offeredProjects as project (project.git_identity)}
+				{@const info = getProjectInfo(project)}
+				{@const isActing = subscriptionActing === project.git_identity}
+				{@const dir = getSelectedDir(project.git_identity)}
+
+				<div class="rounded-[var(--radius-lg)] border border-[var(--warning)]/20 bg-gradient-to-b from-[var(--warning)]/[0.03] to-transparent overflow-hidden">
+					<!-- Project header -->
+					<div class="px-5 pt-5 pb-3">
+						<div class="flex items-start gap-3.5">
+							<div class="w-10 h-10 rounded-lg bg-[var(--warning)]/10 border border-[var(--warning)]/15 flex items-center justify-center shrink-0">
+								<FolderSync size={18} class="text-[var(--warning)]" />
+							</div>
+							<div class="flex-1 min-w-0">
+								<div class="flex items-center gap-2.5">
+									<h4 class="text-[15px] font-semibold text-[var(--text-primary)] truncate">
+										{info.displayName}
+									</h4>
+									<span class="px-2 py-0.5 text-[10px] font-semibold tracking-wide uppercase rounded-full bg-[var(--warning)]/10 text-[var(--warning)] border border-[var(--warning)]/15 shrink-0">
+										invitation
+									</span>
+								</div>
+								<p class="text-xs font-mono text-[var(--text-faint)] mt-1 truncate">{info.path}</p>
+							</div>
+						</div>
+
+						<p class="text-[13px] text-[var(--text-secondary)] mt-4">
+							Choose how you want to sync sessions for this project:
+						</p>
 					</div>
-					<div class="flex-1 min-w-0">
-						<div class="text-sm font-medium text-[var(--text-primary)] truncate">{folder.project_name}</div>
-						{#if folder.from_member}
-							<div class="text-[11px] text-[var(--text-muted)] mt-0.5">from {folder.from_member}</div>
-						{/if}
+
+					<!-- Direction selector — 3 option cards -->
+					<div class="px-5 pb-4">
+						<div class="grid grid-cols-3 gap-2">
+							{#each DIRECTION_OPTIONS as opt}
+								{@const isSelected = dir === opt.value}
+								{@const Icon = opt.icon}
+								<button
+									onclick={() => selectDir(project.git_identity, opt.value)}
+									class="relative flex flex-col items-center gap-1.5 p-3.5 rounded-[var(--radius-md)] border-2 transition-all text-center
+										{isSelected
+											? 'border-[var(--accent)] bg-[var(--accent)]/[0.05] shadow-[0_0_0_1px_rgba(var(--accent-rgb),0.1)]'
+											: 'border-[var(--border)] hover:border-[var(--text-faint)]/40 hover:bg-[var(--bg-subtle)]'}"
+								>
+									{#if isSelected}
+										<span class="absolute top-2 right-2 w-4 h-4 rounded-full bg-[var(--accent)] flex items-center justify-center">
+											<Check size={10} class="text-white" />
+										</span>
+									{/if}
+									<Icon size={18} class={isSelected ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'} />
+									<span class="text-xs font-semibold {isSelected ? 'text-[var(--accent)]' : 'text-[var(--text-primary)]'}">
+										{opt.label}
+									</span>
+									<span class="text-[10px] leading-snug {isSelected ? 'text-[var(--accent)]/70' : 'text-[var(--text-muted)]'}">
+										{opt.desc}
+									</span>
+								</button>
+							{/each}
+						</div>
 					</div>
-					<div class="flex gap-2 shrink-0">
+
+					<!-- Actions footer -->
+					<div class="flex items-center gap-3 px-5 py-3.5 border-t border-[var(--border)]/60 bg-[var(--bg-subtle)]/40">
 						<button
-							onclick={() => acceptFolder(folder)}
-							disabled={acceptingId === folder.folder_id}
-							class="px-3 py-1.5 text-xs font-medium rounded-[var(--radius-md)] bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-50"
+							onclick={() => handleSubscriptionAction(project.git_identity, 'accept', dir)}
+							disabled={isActing}
+							class="flex items-center gap-2 px-5 py-2 text-sm font-medium rounded-[var(--radius-md)] bg-[var(--success)] text-white hover:bg-[var(--success)]/85 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
 						>
-							{#if acceptingId === folder.folder_id}
-								<Loader2 size={12} class="animate-spin" />
+							{#if isActing}
+								<Loader2 size={14} class="animate-spin" />
+								Accepting...
 							{:else}
+								<Check size={14} />
 								Accept
 							{/if}
 						</button>
 						<button
-							onclick={() => rejectFolder(folder)}
-							disabled={rejectingId === folder.folder_id}
-							class="px-3 py-1.5 text-xs font-medium rounded-[var(--radius-md)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-muted)] transition-colors disabled:opacity-50"
+							onclick={() => handleSubscriptionAction(project.git_identity, 'decline')}
+							disabled={isActing}
+							class="flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-[var(--radius-md)] text-[var(--text-muted)] hover:text-[var(--error)] hover:bg-[var(--error)]/5 transition-colors disabled:opacity-50"
 						>
-							Reject
+							<X size={14} />
+							Decline
 						</button>
 					</div>
 				</div>
 			{/each}
-		</div>
+		</section>
 	{/if}
 
-	<!-- Header row (leader only: Add Projects) -->
+	<!-- ═══════════════════════════════════════════════════════
+	     Active Projects — accepted / paused / declined / no-sub
+	     ═══════════════════════════════════════════════════════ -->
+
+	<!-- Leader: Add Projects button -->
 	{#if isLeader}
 		<div class="flex items-center justify-between">
 			<button
@@ -314,47 +314,43 @@
 		<p class="text-xs text-[var(--error)]" aria-live="polite">{removeProjectError}</p>
 	{/if}
 
-	<!-- Project cards -->
 	<div class="space-y-2">
-		{#each projects as project (project.git_identity)}
+		{#each activeProjects as project (project.git_identity)}
+			{@const info = getProjectInfo(project)}
 			{@const mySub = getMySubscription(project.git_identity)}
 			{@const isActing = subscriptionActing === project.git_identity}
 			{@const isDirActing = directionActing === project.git_identity}
-			<div class="p-4 rounded-lg border border-[var(--border)] bg-[var(--bg-base)]">
-				<!-- Project header info -->
+
+			<div class="p-4 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--bg-base)]">
+				<!-- Project header -->
 				<div class="flex items-center justify-between">
 					<div class="flex items-center gap-3 min-w-0">
-						<FolderSync size={16} class="text-[var(--text-muted)] shrink-0" />
+						<div class="w-8 h-8 rounded-lg bg-[var(--accent)]/8 flex items-center justify-center shrink-0">
+							<FolderSync size={15} class="text-[var(--accent)]" />
+						</div>
 						<div class="min-w-0">
 							{#if project.encoded_name}
 								<a
 									href="/projects/{project.encoded_name}"
-									class="text-sm font-medium text-[var(--text-primary)] hover:text-[var(--accent)] transition-colors truncate block"
+									class="text-sm font-semibold text-[var(--text-primary)] hover:text-[var(--accent)] transition-colors truncate block"
 								>
-									{getProjectDisplayName(project)}
+									{info.displayName}
 								</a>
 							{:else}
-								<span class="text-sm font-medium text-[var(--text-primary)] truncate block">
-									{getProjectDisplayName(project)}
+								<span class="text-sm font-semibold text-[var(--text-primary)] truncate block">
+									{info.displayName}
 								</span>
 							{/if}
-							<div class="flex items-center gap-2 mt-0.5">
-								<span class="text-[11px] text-[var(--text-muted)] font-mono truncate">
-									{project.git_identity}
-								</span>
-								<span class="text-[var(--border)]">&middot;</span>
-								<span class="text-[11px] text-[var(--text-muted)] font-mono">
-									{project.folder_suffix}
-								</span>
-							</div>
+							<p class="text-[11px] font-mono text-[var(--text-faint)] mt-0.5 truncate">{info.path}</p>
 						</div>
 					</div>
+
 					<div class="flex items-center gap-2 shrink-0">
 						<!-- Project status badge -->
-						<span class="px-2 py-1 text-[11px] font-medium rounded-full border
+						<span class="px-2 py-0.5 text-[10px] font-medium rounded-full border
 							{project.status === 'shared'
-								? 'bg-[var(--success)]/10 text-[var(--success)] border-[var(--success)]/20'
-								: 'bg-[var(--error)]/10 text-[var(--error)] border-[var(--error)]/20'}">
+								? 'bg-[var(--success)]/8 text-[var(--success)] border-[var(--success)]/15'
+								: 'bg-[var(--error)]/8 text-[var(--error)] border-[var(--error)]/15'}">
 							{project.status}
 						</span>
 
@@ -363,13 +359,13 @@
 							<div class="flex items-center gap-1.5">
 								<button
 									onclick={() => handleRemoveProject(project.git_identity)}
-									class="px-2 py-1 text-xs font-medium rounded bg-[var(--error)] text-white hover:bg-[var(--error)]/80 transition-colors"
+									class="px-2 py-1 text-xs font-medium rounded-[var(--radius-sm)] bg-[var(--error)] text-white hover:bg-[var(--error)]/80 transition-colors"
 								>
 									Remove
 								</button>
 								<button
 									onclick={() => (removeProjectConfirm = null)}
-									class="px-2 py-1 text-xs rounded text-[var(--text-muted)] hover:bg-[var(--bg-muted)] transition-colors"
+									class="px-2 py-1 text-xs rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:bg-[var(--bg-muted)] transition-colors"
 								>
 									Cancel
 								</button>
@@ -377,9 +373,9 @@
 						{:else if isLeader}
 							<button
 								onclick={() => (removeProjectConfirm = project.git_identity)}
-								class="p-1.5 rounded text-[var(--text-muted)] hover:text-[var(--error)] hover:bg-[var(--error)]/10 transition-colors"
+								class="p-1.5 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--error)] hover:bg-[var(--error)]/8 transition-colors"
 								title="Remove from team"
-								aria-label="Remove project {getProjectDisplayName(project)}"
+								aria-label="Remove project {info.displayName}"
 							>
 								<Trash2 size={14} />
 							</button>
@@ -387,26 +383,25 @@
 					</div>
 				</div>
 
-				<!-- Subscription row -->
+				<!-- Subscription row (for non-offered states) -->
 				{#if mySub}
-					<div class="flex items-center justify-between mt-3 pt-3 border-t border-[var(--border)]/50">
+					<div class="flex items-center justify-between mt-3 pt-3 border-t border-[var(--border)]/40">
 						<div class="flex items-center gap-2">
-							<span class="text-[11px] text-[var(--text-muted)]">My subscription:</span>
+							<span class="text-[11px] text-[var(--text-muted)]">Sync:</span>
 							<span class="px-2 py-0.5 text-[10px] font-medium rounded-full border
-								{mySub.status === 'accepted' ? 'bg-[var(--success)]/10 text-[var(--success)] border-[var(--success)]/20'
-								: mySub.status === 'paused' ? 'bg-[var(--warning)]/10 text-[var(--warning)] border-[var(--warning)]/20'
-								: mySub.status === 'declined' ? 'bg-[var(--error)]/10 text-[var(--error)] border-[var(--error)]/20'
+								{mySub.status === 'accepted' ? 'bg-[var(--success)]/8 text-[var(--success)] border-[var(--success)]/15'
+								: mySub.status === 'paused' ? 'bg-[var(--warning)]/8 text-[var(--warning)] border-[var(--warning)]/15'
+								: mySub.status === 'declined' ? 'bg-[var(--error)]/8 text-[var(--error)] border-[var(--error)]/15'
 								: 'bg-[var(--bg-muted)] text-[var(--text-muted)] border-[var(--border)]'}">
 								{mySub.status}
 							</span>
 							{#if mySub.status === 'accepted'}
-								<!-- Direction toggle button -->
 								{@const DirIcon = directionIcon(mySub.direction)}
 								<button
 									onclick={() => handleDirectionChange(project.git_identity, cycleDirection(mySub.direction))}
 									disabled={isDirActing}
-									class="flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-full border border-[var(--accent)]/20 bg-[var(--accent)]/10 text-[var(--accent)] hover:bg-[var(--accent)]/20 transition-colors disabled:opacity-50"
-									title="Click to cycle direction"
+									class="flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-full border border-[var(--accent)]/15 bg-[var(--accent)]/6 text-[var(--accent)] hover:bg-[var(--accent)]/12 transition-colors disabled:opacity-50"
+									title="Click to change sync direction"
 								>
 									{#if isDirActing}
 										<Loader2 size={10} class="animate-spin" />
@@ -418,50 +413,12 @@
 							{/if}
 						</div>
 
-						<!-- Subscription actions -->
 						<div class="flex items-center gap-1.5">
-							{#if mySub.status === 'offered'}
-								<!-- Direction-aware accept buttons -->
-								<div class="flex items-center gap-1 rounded-md border border-[var(--success)]/30 overflow-hidden">
-									<button
-										onclick={() => handleSubscriptionAction(project.git_identity, 'accept', 'both')}
-										disabled={isActing}
-										class="flex items-center gap-1 px-2 py-1 text-xs font-medium bg-[var(--success)] text-white hover:bg-[var(--success)]/85 transition-colors disabled:opacity-50"
-										title="Send & receive sessions"
-									>
-										{#if isActing}<Loader2 size={10} class="animate-spin" />{:else}<ArrowUpDown size={10} />{/if}
-										Both
-									</button>
-									<button
-										onclick={() => handleSubscriptionAction(project.git_identity, 'accept', 'send')}
-										disabled={isActing}
-										class="flex items-center gap-1 px-2 py-1 text-xs font-medium bg-[var(--success)]/80 text-white hover:bg-[var(--success)]/65 transition-colors disabled:opacity-50"
-										title="Send only"
-									>
-										<ArrowUp size={10} />
-									</button>
-									<button
-										onclick={() => handleSubscriptionAction(project.git_identity, 'accept', 'receive')}
-										disabled={isActing}
-										class="flex items-center gap-1 px-2 py-1 text-xs font-medium bg-[var(--success)]/80 text-white hover:bg-[var(--success)]/65 transition-colors disabled:opacity-50"
-										title="Receive only"
-									>
-										<ArrowDown size={10} />
-									</button>
-								</div>
-								<button
-									onclick={() => handleSubscriptionAction(project.git_identity, 'decline')}
-									disabled={isActing}
-									class="flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md text-[var(--text-muted)] hover:text-[var(--error)] hover:bg-[var(--error)]/5 transition-colors disabled:opacity-50"
-								>
-									<X size={11} />
-									Decline
-								</button>
-							{:else if mySub.status === 'accepted'}
+							{#if mySub.status === 'accepted'}
 								<button
 									onclick={() => handleSubscriptionAction(project.git_identity, 'pause')}
 									disabled={isActing}
-									class="flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md text-[var(--text-muted)] hover:text-[var(--warning)] hover:bg-[var(--warning)]/5 transition-colors disabled:opacity-50"
+									class="flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-[var(--radius-md)] text-[var(--text-muted)] hover:text-[var(--warning)] hover:bg-[var(--warning)]/5 transition-colors disabled:opacity-50"
 								>
 									{#if isActing}<Loader2 size={11} class="animate-spin" />{:else}<Pause size={11} />{/if}
 									Pause
@@ -470,7 +427,7 @@
 								<button
 									onclick={() => handleSubscriptionAction(project.git_identity, 'resume')}
 									disabled={isActing}
-									class="flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md bg-[var(--success)] text-white hover:bg-[var(--success)]/85 transition-colors disabled:opacity-50"
+									class="flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-[var(--radius-md)] bg-[var(--success)] text-white hover:bg-[var(--success)]/85 transition-colors disabled:opacity-50"
 								>
 									{#if isActing}<Loader2 size={11} class="animate-spin" />{:else}<Play size={11} />{/if}
 									Resume
@@ -479,7 +436,7 @@
 								<button
 									onclick={() => handleSubscriptionAction(project.git_identity, 'accept', 'both')}
 									disabled={isActing}
-									class="flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md bg-[var(--success)] text-white hover:bg-[var(--success)]/85 transition-colors disabled:opacity-50"
+									class="flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-[var(--radius-md)] bg-[var(--success)] text-white hover:bg-[var(--success)]/85 transition-colors disabled:opacity-50"
 								>
 									{#if isActing}<Loader2 size={11} class="animate-spin" />{:else}<Play size={11} />{/if}
 									Re-accept
@@ -492,9 +449,19 @@
 		{/each}
 
 		{#if projects.length === 0}
-			<p class="text-sm text-[var(--text-muted)] py-8 text-center">
-				No projects shared yet. Add projects to start syncing sessions with your team.
-			</p>
+			<div class="text-center py-12">
+				<div class="w-12 h-12 mx-auto mb-3 rounded-xl bg-[var(--bg-muted)] flex items-center justify-center">
+					<FolderSync size={20} class="text-[var(--text-muted)]" />
+				</div>
+				<p class="text-sm font-medium text-[var(--text-secondary)]">No projects shared yet</p>
+				<p class="text-xs text-[var(--text-muted)] mt-1">
+					{#if isLeader}
+						Add projects to start syncing sessions with your team.
+					{:else}
+						The team leader hasn't shared any projects yet.
+					{/if}
+				</p>
+			</div>
 		{/if}
 	</div>
 </div>

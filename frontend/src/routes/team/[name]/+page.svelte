@@ -259,7 +259,6 @@
 				{memberTag}
 				{isLeader}
 				allProjects={data.allProjects}
-				teamMemberTags={members.map(m => m.member_tag)}
 				onrefresh={handleRefresh}
 			/>
 		</Tabs.Content>
