@@ -201,7 +201,6 @@
 			<TeamOverviewTab
 				{team}
 				teamName={data.teamName}
-				joinCode={data.joinCode}
 				{deleteConfirm}
 				{deleting}
 				{deleteError}

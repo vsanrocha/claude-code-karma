@@ -9,16 +9,13 @@
 	} from 'lucide-svelte';
 	import type {
 		SyncTeam,
-		JoinCodeResponse,
 		StatItem
 	} from '$lib/api-types';
-	import JoinCodeCard from './JoinCodeCard.svelte';
 	import StatsGrid from '$lib/components/StatsGrid.svelte';
 
 	interface Props {
 		team: SyncTeam;
 		teamName: string;
-		joinCode: JoinCodeResponse | null;
 		onleave: () => void;
 		deleteConfirm: boolean;
 		deleting: boolean;
@@ -30,7 +27,7 @@
 	let {
 		team,
 		teamName,
-		joinCode,
+
 		onleave,
 		deleteConfirm,
 		deleting,
@@ -107,13 +104,6 @@
 			</div>
 		</div>
 	</section>
-
-	<!-- Join Code -->
-	{#if joinCode}
-		<section>
-			<JoinCodeCard code={joinCode.code} />
-		</section>
-	{/if}
 
 	<!-- Stats Row -->
 	<section>

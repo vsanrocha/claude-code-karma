@@ -62,7 +62,7 @@
 <div class="space-y-4">
 	{#if members.length === 0}
 		<p class="text-sm text-[var(--text-muted)] py-8 text-center">
-			No members yet. Share your join code to invite teammates.
+			No members yet. Ask teammates to share their pairing code from /sync, then add them here.
 		</p>
 	{:else}
 		<div class="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -164,7 +164,7 @@
 			<ul class="space-y-1.5 text-xs text-[var(--text-muted)]">
 				<li class="flex items-start gap-2">
 					<span class="shrink-0 mt-0.5 w-1 h-1 rounded-full bg-[var(--text-muted)]"></span>
-					Share the join code with your teammate
+					Ask your teammate to copy their pairing code from /sync
 				</li>
 				<li class="flex items-start gap-2">
 					<span class="shrink-0 mt-0.5 w-1 h-1 rounded-full bg-[var(--text-muted)]"></span>

@@ -3,7 +3,6 @@ import { API_BASE } from '$lib/config';
 import { safeFetch, fetchWithFallback } from '$lib/utils/api-fetch';
 import type {
 	SyncTeam,
-	JoinCodeResponse,
 	SyncStatusResponse,
 	SyncEvent
 } from '$lib/api-types';
@@ -20,10 +19,9 @@ export const load: PageServerLoad = async ({ fetch, params }) => {
 	const teamName = params.name;
 	const teamNameEnc = encodeURIComponent(teamName);
 
-	// Fetch in parallel: team detail (includes members+projects+subscriptions), join code, sync status, activity, all projects
-	const [teamResult, joinCodeResult, syncStatus, activityData, allProjects] = await Promise.all([
+	// Fetch in parallel: team detail (includes members+projects+subscriptions), sync status, activity, all projects
+	const [teamResult, syncStatus, activityData, allProjects] = await Promise.all([
 		safeFetch<SyncTeam>(fetch, `${API_BASE}/sync/teams/${teamNameEnc}`),
-		safeFetch<JoinCodeResponse>(fetch, `${API_BASE}/sync/teams/${teamNameEnc}/join-code`),
 		fetchWithFallback<SyncStatusResponse>(fetch, `${API_BASE}/sync/status`, {
 			configured: false
 		}),
@@ -44,7 +42,6 @@ export const load: PageServerLoad = async ({ fetch, params }) => {
 	return {
 		teamName,
 		team,
-		joinCode: joinCodeResult.ok ? joinCodeResult.data : null,
 		syncStatus,
 		activity: activityData.events ?? [],
 		allProjects: allProjects.map((p) => ({
