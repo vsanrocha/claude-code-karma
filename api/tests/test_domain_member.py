@@ -12,8 +12,8 @@ from domain.team import InvalidTransitionError
 
 def make_member(**kwargs):
     defaults = dict(
-        member_id="member-001",
-        team_id="team-abc",
+        member_tag="alice.macbook",
+        team_name="team-abc",
         user_id="alice",
         machine_tag="macbook",
         device_id="DEVICE123",
@@ -25,41 +25,51 @@ def make_member(**kwargs):
 class TestMemberModel:
     def test_create_member_defaults(self):
         m = make_member()
-        assert m.member_id == "member-001"
-        assert m.team_id == "team-abc"
+        assert m.member_tag == "alice.macbook"
+        assert m.team_name == "team-abc"
         assert m.user_id == "alice"
         assert m.machine_tag == "macbook"
         assert m.device_id == "DEVICE123"
         assert m.status == MemberStatus.ADDED
-        assert isinstance(m.joined_at, datetime)
-        assert m.joined_at.tzinfo is not None
+        assert isinstance(m.added_at, datetime)
+        assert m.added_at.tzinfo is not None
+        assert isinstance(m.updated_at, datetime)
+        assert m.updated_at.tzinfo is not None
 
     def test_member_is_frozen(self):
         m = make_member()
         with pytest.raises(Exception):
             m.user_id = "changed"
 
-    def test_member_tag_derived_property(self):
-        m = make_member(user_id="alice", machine_tag="macbook")
-        assert m.member_tag == "alice.macbook"
+    def test_is_active_false_when_added(self):
+        m = make_member()
+        assert m.is_active is False
+
+    def test_is_active_true_when_active(self):
+        m = make_member()
+        activated = m.activate()
+        assert activated.is_active is True
+
+    def test_is_active_false_when_removed(self):
+        m = make_member()
+        removed = m.remove()
+        assert removed.is_active is False
 
     def test_from_member_tag_classmethod(self):
         m = Member.from_member_tag(
             member_tag="bob.desktop",
-            member_id="member-002",
-            team_id="team-abc",
+            team_name="team-abc",
             device_id="DEVICE456",
         )
         assert m.user_id == "bob"
         assert m.machine_tag == "desktop"
         assert m.member_tag == "bob.desktop"
 
-    def test_from_member_tag_with_dot_in_user_id(self):
+    def test_from_member_tag_with_dot_in_machine_tag(self):
         # user_id cannot contain dots per spec — first dot splits user.machine
         m = Member.from_member_tag(
             member_tag="alice.work.laptop",
-            member_id="member-003",
-            team_id="team-abc",
+            team_name="team-abc",
             device_id="DEVICE789",
         )
         assert m.user_id == "alice"

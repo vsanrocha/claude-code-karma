@@ -2,7 +2,7 @@
 
 A Subscription represents a member's opt-in/opt-out state for a shared project.
 State machine:
-  OFFERED → ACCEPTED (accept)
+  OFFERED → ACCEPTED (accept(direction))
   ACCEPTED → PAUSED (pause)
   PAUSED → ACCEPTED (resume)
   OFFERED|ACCEPTED|PAUSED → DECLINED (decline)
@@ -38,13 +38,12 @@ class Subscription(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    subscription_id: str
-    team_id: str
-    project_id: str
     member_tag: str
-    direction: SyncDirection = SyncDirection.BOTH
+    team_name: str
+    project_git_identity: str
     status: SubscriptionStatus = SubscriptionStatus.OFFERED
-    created_at: datetime = Field(
+    direction: SyncDirection = SyncDirection.BOTH
+    updated_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc)
     )
 
@@ -52,8 +51,8 @@ class Subscription(BaseModel):
     # State transitions
     # ------------------------------------------------------------------
 
-    def accept(self) -> "Subscription":
-        """Transition OFFERED → ACCEPTED.
+    def accept(self, direction: SyncDirection) -> "Subscription":
+        """Transition OFFERED → ACCEPTED with the given direction.
 
         Raises:
             InvalidTransitionError: if status is not OFFERED.
@@ -63,7 +62,11 @@ class Subscription(BaseModel):
                 f"Cannot accept subscription in status '{self.status.value}'. "
                 "Must be in OFFERED status."
             )
-        return self.model_copy(update={"status": SubscriptionStatus.ACCEPTED})
+        return self.model_copy(update={
+            "status": SubscriptionStatus.ACCEPTED,
+            "direction": direction,
+            "updated_at": datetime.now(timezone.utc),
+        })
 
     def pause(self) -> "Subscription":
         """Transition ACCEPTED → PAUSED.
@@ -76,7 +79,10 @@ class Subscription(BaseModel):
                 f"Cannot pause subscription in status '{self.status.value}'. "
                 "Must be in ACCEPTED status."
             )
-        return self.model_copy(update={"status": SubscriptionStatus.PAUSED})
+        return self.model_copy(update={
+            "status": SubscriptionStatus.PAUSED,
+            "updated_at": datetime.now(timezone.utc),
+        })
 
     def resume(self) -> "Subscription":
         """Transition PAUSED → ACCEPTED.
@@ -89,7 +95,10 @@ class Subscription(BaseModel):
                 f"Cannot resume subscription in status '{self.status.value}'. "
                 "Must be in PAUSED status."
             )
-        return self.model_copy(update={"status": SubscriptionStatus.ACCEPTED})
+        return self.model_copy(update={
+            "status": SubscriptionStatus.ACCEPTED,
+            "updated_at": datetime.now(timezone.utc),
+        })
 
     def decline(self) -> "Subscription":
         """Transition any status except DECLINED → DECLINED.
@@ -101,7 +110,10 @@ class Subscription(BaseModel):
             raise InvalidTransitionError(
                 "Subscription is already declined."
             )
-        return self.model_copy(update={"status": SubscriptionStatus.DECLINED})
+        return self.model_copy(update={
+            "status": SubscriptionStatus.DECLINED,
+            "updated_at": datetime.now(timezone.utc),
+        })
 
     def change_direction(self, direction: SyncDirection) -> "Subscription":
         """Change sync direction. Only allowed when ACCEPTED.
@@ -114,4 +126,7 @@ class Subscription(BaseModel):
                 f"Cannot change direction of subscription in status '{self.status.value}'. "
                 "Must be in ACCEPTED status."
             )
-        return self.model_copy(update={"direction": direction})
+        return self.model_copy(update={
+            "direction": direction,
+            "updated_at": datetime.now(timezone.utc),
+        })

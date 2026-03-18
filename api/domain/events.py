@@ -38,12 +38,12 @@ class SyncEvent(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    event_id: str
-    team_id: str
     event_type: SyncEventType
-    actor_device: str
-    subject_id: Optional[str] = None
-    payload: Optional[Dict[str, Any]] = None
-    occurred_at: datetime = Field(
+    team_name: Optional[str] = None
+    member_tag: Optional[str] = None
+    project_git_identity: Optional[str] = None
+    session_uuid: Optional[str] = None
+    detail: Optional[Dict[str, Any]] = None
+    created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc)
     )

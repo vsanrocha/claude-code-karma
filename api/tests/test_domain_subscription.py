@@ -12,10 +12,9 @@ from domain.team import InvalidTransitionError
 
 def make_sub(**kwargs):
     defaults = dict(
-        subscription_id="sub-001",
-        team_id="team-abc",
-        project_id="proj-001",
         member_tag="alice.macbook",
+        team_name="team-abc",
+        project_git_identity="owner/repo",
         direction=SyncDirection.BOTH,
     )
     defaults.update(kwargs)
@@ -40,14 +39,13 @@ class TestSubscriptionStatus:
 class TestSubscriptionModel:
     def test_create_defaults(self):
         s = make_sub()
-        assert s.subscription_id == "sub-001"
-        assert s.team_id == "team-abc"
-        assert s.project_id == "proj-001"
         assert s.member_tag == "alice.macbook"
+        assert s.team_name == "team-abc"
+        assert s.project_git_identity == "owner/repo"
         assert s.direction == SyncDirection.BOTH
         assert s.status == SubscriptionStatus.OFFERED
-        assert isinstance(s.created_at, datetime)
-        assert s.created_at.tzinfo is not None
+        assert isinstance(s.updated_at, datetime)
+        assert s.updated_at.tzinfo is not None
 
     def test_subscription_is_frozen(self):
         s = make_sub()
@@ -60,27 +58,32 @@ class TestSubscriptionModel:
 
     def test_accept_from_offered(self):
         s = make_sub()
-        accepted = s.accept()
+        accepted = s.accept(SyncDirection.BOTH)
         assert accepted.status == SubscriptionStatus.ACCEPTED
+
+    def test_accept_sets_direction(self):
+        s = make_sub(direction=SyncDirection.BOTH)
+        accepted = s.accept(SyncDirection.RECEIVE)
+        assert accepted.direction == SyncDirection.RECEIVE
 
     def test_accept_from_paused_raises(self):
         s = make_sub()
-        accepted = s.accept()
+        accepted = s.accept(SyncDirection.BOTH)
         paused = accepted.pause()
         with pytest.raises(InvalidTransitionError):
-            paused.accept()
+            paused.accept(SyncDirection.BOTH)
 
     def test_accept_from_accepted_raises(self):
         s = make_sub()
-        accepted = s.accept()
+        accepted = s.accept(SyncDirection.BOTH)
         with pytest.raises(InvalidTransitionError):
-            accepted.accept()
+            accepted.accept(SyncDirection.BOTH)
 
     def test_accept_from_declined_raises(self):
         s = make_sub()
         declined = s.decline()
         with pytest.raises(InvalidTransitionError):
-            declined.accept()
+            declined.accept(SyncDirection.BOTH)
 
     # ------------------------------------------------------------------
     # pause: ACCEPTED → PAUSED
@@ -88,7 +91,7 @@ class TestSubscriptionModel:
 
     def test_pause_from_accepted(self):
         s = make_sub()
-        accepted = s.accept()
+        accepted = s.accept(SyncDirection.BOTH)
         paused = accepted.pause()
         assert paused.status == SubscriptionStatus.PAUSED
 
@@ -99,7 +102,7 @@ class TestSubscriptionModel:
 
     def test_pause_from_paused_raises(self):
         s = make_sub()
-        accepted = s.accept()
+        accepted = s.accept(SyncDirection.BOTH)
         paused = accepted.pause()
         with pytest.raises(InvalidTransitionError):
             paused.pause()
@@ -110,13 +113,13 @@ class TestSubscriptionModel:
 
     def test_resume_from_paused(self):
         s = make_sub()
-        paused = s.accept().pause()
+        paused = s.accept(SyncDirection.BOTH).pause()
         resumed = paused.resume()
         assert resumed.status == SubscriptionStatus.ACCEPTED
 
     def test_resume_from_accepted_raises(self):
         s = make_sub()
-        accepted = s.accept()
+        accepted = s.accept(SyncDirection.BOTH)
         with pytest.raises(InvalidTransitionError):
             accepted.resume()
 
@@ -136,12 +139,12 @@ class TestSubscriptionModel:
 
     def test_decline_from_accepted(self):
         s = make_sub()
-        declined = s.accept().decline()
+        declined = s.accept(SyncDirection.BOTH).decline()
         assert declined.status == SubscriptionStatus.DECLINED
 
     def test_decline_from_paused(self):
         s = make_sub()
-        declined = s.accept().pause().decline()
+        declined = s.accept(SyncDirection.BOTH).pause().decline()
         assert declined.status == SubscriptionStatus.DECLINED
 
     def test_decline_from_declined_raises(self):
@@ -156,7 +159,7 @@ class TestSubscriptionModel:
 
     def test_change_direction_when_accepted(self):
         s = make_sub(direction=SyncDirection.BOTH)
-        accepted = s.accept()
+        accepted = s.accept(SyncDirection.BOTH)
         changed = accepted.change_direction(SyncDirection.SEND)
         assert changed.direction == SyncDirection.SEND
         assert changed.status == SubscriptionStatus.ACCEPTED
@@ -168,7 +171,7 @@ class TestSubscriptionModel:
 
     def test_change_direction_when_paused_raises(self):
         s = make_sub()
-        paused = s.accept().pause()
+        paused = s.accept(SyncDirection.BOTH).pause()
         with pytest.raises(InvalidTransitionError):
             paused.change_direction(SyncDirection.SEND)
 

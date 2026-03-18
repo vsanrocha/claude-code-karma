@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field
 
 from domain.team import InvalidTransitionError
 
@@ -26,13 +26,16 @@ class Member(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    member_id: str
-    team_id: str
+    member_tag: str
+    team_name: str
+    device_id: str
     user_id: str
     machine_tag: str
-    device_id: str
     status: MemberStatus = MemberStatus.ADDED
-    joined_at: datetime = Field(
+    added_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc)
     )
 
@@ -40,11 +43,10 @@ class Member(BaseModel):
     # Derived properties
     # ------------------------------------------------------------------
 
-    @computed_field  # type: ignore[misc]
     @property
-    def member_tag(self) -> str:
-        """Unique device identifier within a team: '{user_id}.{machine_tag}'."""
-        return f"{self.user_id}.{self.machine_tag}"
+    def is_active(self) -> bool:
+        """Return True if the member is in ACTIVE status."""
+        return self.status == MemberStatus.ACTIVE
 
     # ------------------------------------------------------------------
     # Class methods
@@ -55,27 +57,29 @@ class Member(BaseModel):
         cls,
         *,
         member_tag: str,
-        member_id: str,
-        team_id: str,
+        team_name: str,
         device_id: str,
         status: MemberStatus = MemberStatus.ADDED,
-        joined_at: Optional[datetime] = None,
+        added_at: Optional[datetime] = None,
+        updated_at: Optional[datetime] = None,
     ) -> "Member":
         """Create a Member by splitting *member_tag* on the first dot.
 
         Per spec: user_id cannot contain dots; first dot separates user from machine.
         """
         user_id, machine_tag = member_tag.split(".", 1)
-        kwargs = dict(
-            member_id=member_id,
-            team_id=team_id,
+        kwargs: dict = dict(
+            member_tag=member_tag,
+            team_name=team_name,
             user_id=user_id,
             machine_tag=machine_tag,
             device_id=device_id,
             status=status,
         )
-        if joined_at is not None:
-            kwargs["joined_at"] = joined_at
+        if added_at is not None:
+            kwargs["added_at"] = added_at
+        if updated_at is not None:
+            kwargs["updated_at"] = updated_at
         return cls(**kwargs)
 
     # ------------------------------------------------------------------
@@ -93,7 +97,10 @@ class Member(BaseModel):
                 f"Cannot activate member in status '{self.status.value}'. "
                 "Member must be in ADDED status."
             )
-        return self.model_copy(update={"status": MemberStatus.ACTIVE})
+        return self.model_copy(update={
+            "status": MemberStatus.ACTIVE,
+            "updated_at": datetime.now(timezone.utc),
+        })
 
     def remove(self) -> "Member":
         """Transition ADDED|ACTIVE → REMOVED.
@@ -103,6 +110,9 @@ class Member(BaseModel):
         """
         if self.status == MemberStatus.REMOVED:
             raise InvalidTransitionError(
-                f"Member is already in REMOVED status."
+                "Member is already in REMOVED status."
             )
-        return self.model_copy(update={"status": MemberStatus.REMOVED})
+        return self.model_copy(update={
+            "status": MemberStatus.REMOVED,
+            "updated_at": datetime.now(timezone.utc),
+        })

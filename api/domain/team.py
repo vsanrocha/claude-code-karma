@@ -7,9 +7,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import List
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
+
+if TYPE_CHECKING:
+    from domain.member import Member
 
 
 class TeamStatus(str, Enum):
@@ -30,12 +33,10 @@ class Team(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    team_id: str
     name: str
-    created_by: str
-    leader_device: str
+    leader_device_id: str
+    leader_member_tag: str
     status: TeamStatus = TeamStatus.ACTIVE
-    member_devices: List[str] = Field(default_factory=list)
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc)
     )
@@ -44,9 +45,9 @@ class Team(BaseModel):
     # Queries
     # ------------------------------------------------------------------
 
-    def is_leader(self, device: str) -> bool:
-        """Return True if *device* is the current team leader."""
-        return self.leader_device == device
+    def is_leader(self, device_id: str) -> bool:
+        """Return True if *device_id* is the current team leader."""
+        return self.leader_device_id == device_id
 
     # ------------------------------------------------------------------
     # State transitions
@@ -65,14 +66,12 @@ class Team(BaseModel):
             )
         if self.status == TeamStatus.DISSOLVED:
             raise InvalidTransitionError(
-                f"Team '{self.team_id}' is already dissolved."
+                f"Team '{self.name}' is already dissolved."
             )
         return self.model_copy(update={"status": TeamStatus.DISSOLVED})
 
-    def add_member(self, device: str, *, by_device: str) -> "Team":
-        """Add *device* to the team's member list.
-
-        Idempotent — adding an already-present device is a no-op.
+    def add_member(self, member: "Member", *, by_device: str) -> "Member":
+        """Add *member* to the team.  Only the leader may add members.
 
         Raises:
             AuthorizationError: if *by_device* is not the leader.
@@ -81,12 +80,12 @@ class Team(BaseModel):
             raise AuthorizationError(
                 f"Device '{by_device}' is not the team leader and cannot add members."
             )
-        if device in self.member_devices:
-            return self
-        return self.model_copy(update={"member_devices": [*self.member_devices, device]})
+        return member
 
-    def remove_member(self, device: str, *, by_device: str) -> "Team":
-        """Remove *device* from the team's member list.
+    def remove_member(self, member: "Member", *, by_device: str) -> "Member":
+        """Remove *member* from the team.  Only the leader may remove members.
+
+        Calls member.remove() and returns the removed Member.
 
         Raises:
             AuthorizationError: if *by_device* is not the leader.
@@ -95,6 +94,4 @@ class Team(BaseModel):
             raise AuthorizationError(
                 f"Device '{by_device}' is not the team leader and cannot remove members."
             )
-        return self.model_copy(
-            update={"member_devices": [d for d in self.member_devices if d != device]}
-        )
+        return member.remove()

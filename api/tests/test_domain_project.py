@@ -11,10 +11,9 @@ from domain.project import SharedProject, SharedProjectStatus, derive_folder_suf
 
 def make_project(**kwargs):
     defaults = dict(
-        project_id="proj-001",
-        team_id="team-abc",
+        team_name="team-abc",
         git_identity="https://github.com/user/repo.git",
-        shared_by="alice.macbook",
+        folder_suffix=derive_folder_suffix("https://github.com/user/repo.git"),
     )
     defaults.update(kwargs)
     return SharedProject(**defaults)
@@ -46,11 +45,9 @@ class TestDeriveFolderSuffix:
 class TestSharedProjectModel:
     def test_create_project_defaults(self):
         p = make_project()
-        assert p.project_id == "proj-001"
-        assert p.team_id == "team-abc"
+        assert p.team_name == "team-abc"
         assert p.git_identity == "https://github.com/user/repo.git"
-        assert p.shared_by == "alice.macbook"
-        assert p.status == SharedProjectStatus.ACTIVE
+        assert p.status == SharedProjectStatus.SHARED
         assert p.encoded_name is None
         assert isinstance(p.shared_at, datetime)
         assert p.shared_at.tzinfo is not None
@@ -68,8 +65,16 @@ class TestSharedProjectModel:
         p = make_project()
         assert p.encoded_name is None
 
-    def test_folder_suffix_derived(self):
-        p = make_project(git_identity="https://github.com/user/myrepo.git")
+    def test_folder_suffix_field(self):
+        p = make_project(git_identity="user/myrepo.git", folder_suffix="user-myrepo")
+        assert p.folder_suffix == "user-myrepo"
+        assert "/" not in p.folder_suffix
+
+    def test_folder_suffix_derived_helper(self):
+        p = make_project(
+            git_identity="https://github.com/user/myrepo.git",
+            folder_suffix=derive_folder_suffix("https://github.com/user/myrepo.git"),
+        )
         assert p.folder_suffix is not None
         assert "myrepo" in p.folder_suffix
         assert "/" not in p.folder_suffix
@@ -86,5 +91,5 @@ class TestSharedProjectModel:
             removed.remove()
 
     def test_shared_project_status_enum_values(self):
-        assert SharedProjectStatus.ACTIVE.value == "active"
+        assert SharedProjectStatus.SHARED.value == "shared"
         assert SharedProjectStatus.REMOVED.value == "removed"

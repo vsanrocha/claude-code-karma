@@ -7,26 +7,37 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import pytest
 from datetime import datetime, timezone
 from domain.team import Team, TeamStatus, AuthorizationError, InvalidTransitionError
+from domain.member import Member
 
 
 def make_team(**kwargs):
     defaults = dict(
-        team_id="team-abc",
         name="My Team",
-        created_by="alice.macbook",
-        leader_device="alice.macbook",
+        leader_device_id="alice.macbook",
+        leader_member_tag="alice.macbook",
     )
     defaults.update(kwargs)
     return Team(**defaults)
 
 
+def make_member(member_tag="bob.desktop", team_name="My Team", device_id="DEVICE456", **kwargs):
+    user_id, machine_tag = member_tag.split(".", 1)
+    return Member(
+        member_tag=member_tag,
+        team_name=team_name,
+        device_id=device_id,
+        user_id=user_id,
+        machine_tag=machine_tag,
+        **kwargs,
+    )
+
+
 class TestTeamModel:
     def test_create_team_defaults(self):
         team = make_team()
-        assert team.team_id == "team-abc"
         assert team.name == "My Team"
-        assert team.created_by == "alice.macbook"
-        assert team.leader_device == "alice.macbook"
+        assert team.leader_device_id == "alice.macbook"
+        assert team.leader_member_tag == "alice.macbook"
         assert team.status == TeamStatus.ACTIVE
         assert isinstance(team.created_at, datetime)
         assert team.created_at.tzinfo is not None
@@ -37,18 +48,18 @@ class TestTeamModel:
             team.name = "changed"
 
     def test_is_leader_true(self):
-        team = make_team(leader_device="alice.macbook")
+        team = make_team(leader_device_id="alice.macbook")
         assert team.is_leader("alice.macbook") is True
 
     def test_is_leader_false(self):
-        team = make_team(leader_device="alice.macbook")
+        team = make_team(leader_device_id="alice.macbook")
         assert team.is_leader("bob.desktop") is False
 
     def test_dissolve_by_leader(self):
         team = make_team()
         dissolved = team.dissolve(by_device="alice.macbook")
         assert dissolved.status == TeamStatus.DISSOLVED
-        assert dissolved.team_id == team.team_id
+        assert dissolved.name == team.name
 
     def test_dissolve_by_non_leader_raises(self):
         team = make_team()
@@ -63,35 +74,43 @@ class TestTeamModel:
 
     def test_add_member_by_leader(self):
         team = make_team()
-        updated = team.add_member("bob.desktop", by_device="alice.macbook")
-        assert "bob.desktop" in updated.member_devices
+        member = make_member()
+        returned = team.add_member(member, by_device="alice.macbook")
+        assert returned.member_tag == "bob.desktop"
 
     def test_add_member_by_non_leader_raises(self):
         team = make_team()
+        member = make_member()
         with pytest.raises(AuthorizationError):
-            team.add_member("bob.desktop", by_device="bob.desktop")
+            team.add_member(member, by_device="bob.desktop")
 
-    def test_add_member_already_present_is_idempotent(self):
+    def test_add_member_returns_member(self):
         team = make_team()
-        updated = team.add_member("bob.desktop", by_device="alice.macbook")
-        updated2 = updated.add_member("bob.desktop", by_device="alice.macbook")
-        assert updated2.member_devices.count("bob.desktop") == 1
+        member = make_member()
+        result = team.add_member(member, by_device="alice.macbook")
+        assert isinstance(result, Member)
+        assert result.member_tag == member.member_tag
 
     def test_remove_member_by_leader(self):
         team = make_team()
-        updated = team.add_member("bob.desktop", by_device="alice.macbook")
-        removed = updated.remove_member("bob.desktop", by_device="alice.macbook")
-        assert "bob.desktop" not in removed.member_devices
+        member = make_member()
+        removed = team.remove_member(member, by_device="alice.macbook")
+        from domain.member import MemberStatus
+        assert removed.status == MemberStatus.REMOVED
 
     def test_remove_member_by_non_leader_raises(self):
         team = make_team()
-        updated = team.add_member("bob.desktop", by_device="alice.macbook")
+        member = make_member()
         with pytest.raises(AuthorizationError):
-            updated.remove_member("bob.desktop", by_device="carol.laptop")
+            team.remove_member(member, by_device="carol.laptop")
 
-    def test_member_devices_default_empty(self):
+    def test_remove_member_returns_removed_member(self):
         team = make_team()
-        assert team.member_devices == []
+        member = make_member()
+        result = team.remove_member(member, by_device="alice.macbook")
+        assert isinstance(result, Member)
+        from domain.member import MemberStatus
+        assert result.status == MemberStatus.REMOVED
 
     def test_team_status_enum_values(self):
         assert TeamStatus.ACTIVE.value == "active"

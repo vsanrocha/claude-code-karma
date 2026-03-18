@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field
 
 from domain.team import InvalidTransitionError
 
@@ -35,7 +35,7 @@ def derive_folder_suffix(git_identity: str) -> str:
 
 
 class SharedProjectStatus(str, Enum):
-    ACTIVE = "active"
+    SHARED = "shared"
     REMOVED = "removed"
 
 
@@ -44,38 +44,27 @@ class SharedProject(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    project_id: str
-    team_id: str
+    team_name: str
     git_identity: str
-    shared_by: str
     encoded_name: Optional[str] = None
-    status: SharedProjectStatus = SharedProjectStatus.ACTIVE
+    folder_suffix: str
+    status: SharedProjectStatus = SharedProjectStatus.SHARED
     shared_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc)
     )
-
-    # ------------------------------------------------------------------
-    # Derived properties
-    # ------------------------------------------------------------------
-
-    @computed_field  # type: ignore[misc]
-    @property
-    def folder_suffix(self) -> str:
-        """Syncthing folder suffix derived from git_identity."""
-        return derive_folder_suffix(self.git_identity)
 
     # ------------------------------------------------------------------
     # State transitions
     # ------------------------------------------------------------------
 
     def remove(self) -> "SharedProject":
-        """Transition ACTIVE → REMOVED.
+        """Transition SHARED → REMOVED.
 
         Raises:
             InvalidTransitionError: if already REMOVED.
         """
         if self.status == SharedProjectStatus.REMOVED:
             raise InvalidTransitionError(
-                f"Project '{self.project_id}' is already removed."
+                f"Project '{self.git_identity}' is already removed."
             )
         return self.model_copy(update={"status": SharedProjectStatus.REMOVED})
