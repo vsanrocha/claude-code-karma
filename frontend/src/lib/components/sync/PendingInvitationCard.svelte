@@ -33,25 +33,23 @@
 		folders: { folder_id: string; label: string; from_device: string; from_member: string; offered_at: string; folder_type: string }[]
 	): Invitation[] {
 		const results: Invitation[] = [];
+		const metaRegex = /^karma-meta--(.+)$/;
+		const outRegex = /^karma-out--(.+?)--(.+)$/;
+		const seenDevices = new Set<string>();
 
+		// 1) Pending devices — may or may not have folders yet
 		for (const device of devices) {
+			seenDevices.add(device.device_id);
 			const deviceFolders = folders.filter((f) => f.from_device === device.device_id);
 
-			// Extract team name from karma-meta--{team} folders
 			let teamName = '';
-			const metaRegex = /^karma-meta--(.+)$/;
 			for (const f of deviceFolders) {
 				const match = f.folder_id.match(metaRegex);
-				if (match) {
-					teamName = match[1];
-					break;
-				}
+				if (match) { teamName = match[1]; break; }
 			}
 
-			// Extract leader member_tag and project suffixes from karma-out--{member_tag}--{suffix}
 			let leaderMemberTag = '';
 			const projectSuffixes: string[] = [];
-			const outRegex = /^karma-out--(.+?)--(.+)$/;
 			for (const f of deviceFolders) {
 				const match = f.folder_id.match(outRegex);
 				if (match) {
@@ -60,7 +58,6 @@
 				}
 			}
 
-			// Parse member_tag: split on first dot -> user_id.machine_tag
 			let leaderUserId = leaderMemberTag;
 			let leaderMachineTag = '';
 			const dotIdx = leaderMemberTag.indexOf('.');
@@ -69,18 +66,62 @@
 				leaderMachineTag = leaderMemberTag.substring(dotIdx + 1);
 			}
 
-			// Only show if we could extract a team name
-			if (teamName) {
-				results.push({
-					device_id: device.device_id,
-					team_name: teamName,
-					leader_user_id: leaderUserId,
-					leader_machine_tag: leaderMachineTag,
-					leader_member_tag: leaderMemberTag,
-					projects: projectSuffixes,
-					time: device.time
-				});
+			results.push({
+				device_id: device.device_id,
+				team_name: teamName || '',
+				leader_user_id: leaderUserId || device.name.split('.')[0] || 'Unknown',
+				leader_machine_tag: leaderMachineTag || device.name || '',
+				leader_member_tag: leaderMemberTag || device.name || '',
+				projects: projectSuffixes,
+				time: device.time
+			});
+		}
+
+		// 2) Pending folders from already-accepted devices (not in pending devices list).
+		//    Group by from_device so we get one invitation per device.
+		const orphanFoldersByDevice = new Map<string, typeof folders>();
+		for (const f of folders) {
+			if (!seenDevices.has(f.from_device)) {
+				const arr = orphanFoldersByDevice.get(f.from_device) ?? [];
+				arr.push(f);
+				orphanFoldersByDevice.set(f.from_device, arr);
 			}
+		}
+
+		for (const [deviceId, deviceFolders] of orphanFoldersByDevice) {
+			let teamName = '';
+			for (const f of deviceFolders) {
+				const match = f.folder_id.match(metaRegex);
+				if (match) { teamName = match[1]; break; }
+			}
+
+			let leaderMemberTag = '';
+			const projectSuffixes: string[] = [];
+			for (const f of deviceFolders) {
+				const match = f.folder_id.match(outRegex);
+				if (match) {
+					if (!leaderMemberTag) leaderMemberTag = match[1];
+					projectSuffixes.push(match[2]);
+				}
+			}
+
+			let leaderUserId = leaderMemberTag;
+			let leaderMachineTag = '';
+			const dotIdx = leaderMemberTag.indexOf('.');
+			if (dotIdx > 0) {
+				leaderUserId = leaderMemberTag.substring(0, dotIdx);
+				leaderMachineTag = leaderMemberTag.substring(dotIdx + 1);
+			}
+
+			results.push({
+				device_id: deviceId,
+				team_name: teamName || '',
+				leader_user_id: leaderUserId || 'Unknown',
+				leader_machine_tag: leaderMachineTag || '',
+				leader_member_tag: leaderMemberTag || '',
+				projects: projectSuffixes,
+				time: deviceFolders[0]?.offered_at || ''
+			});
 		}
 
 		return results;
@@ -110,16 +151,29 @@
 	async function acceptInvitation(inv: Invitation) {
 		acceptingId = inv.device_id;
 		try {
-			const res = await fetch(`${API_BASE}/sync/pending-devices/${encodeURIComponent(inv.device_id)}/accept`, {
+			// Try accepting as a pending device first (auto-accepts karma-meta-- folders)
+			const devRes = await fetch(`${API_BASE}/sync/pending-devices/${encodeURIComponent(inv.device_id)}/accept`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ name: '' })
 			});
-			if (res.ok) {
-				const data = await res.json();
-				const teams: string[] = data.teams ?? [inv.team_name];
+
+			if (devRes.ok) {
+				const data = await devRes.json();
+				const teams: string[] = data.teams ?? (inv.team_name ? [inv.team_name] : []);
 				onaccepted?.(teams);
+			} else if (inv.team_name) {
+				// Device already accepted — accept the pending meta folder directly
+				const folderId = `karma-meta--${inv.team_name}`;
+				const folderRes = await fetch(`${API_BASE}/sync/pending/accept/${encodeURIComponent(folderId)}`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' }
+				});
+				if (folderRes.ok) {
+					onaccepted?.([inv.team_name]);
+				}
 			}
+
 			await fetchPending();
 		} catch {
 			// Silently handle
@@ -198,7 +252,7 @@
 				<div class="flex-1 min-w-0">
 					<div class="flex items-center gap-2">
 						<h3 class="text-sm font-semibold text-[var(--text-primary)] truncate">
-							Team invitation — {inv.team_name}
+							{inv.team_name ? `Team invitation — ${inv.team_name}` : 'Device pairing request'}
 						</h3>
 						<span
 							class="shrink-0 px-2 py-0.5 text-[10px] font-medium rounded-full bg-[var(--warning)]/10 text-[var(--warning)] border border-[var(--warning)]/20"
@@ -208,7 +262,7 @@
 					</div>
 					<p class="text-xs text-[var(--text-muted)] mt-0.5">
 						<span class="font-mono text-[var(--text-secondary)]">{inv.leader_member_tag || inv.leader_user_id}</span>
-						wants to sync
+						{inv.team_name ? 'wants to sync' : 'wants to connect'}
 					</p>
 				</div>
 			</div>

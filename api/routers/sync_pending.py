@@ -92,12 +92,14 @@ async def accept_pending_device(
 
         _meta_re = re.compile(r"^karma-meta--(.+)$")
 
-        for folder_id, device_map in raw.items():
+        for folder_id, folder_data in raw.items():
             m = _meta_re.match(folder_id)
             if not m:
                 continue
+            # Syncthing nests under "offeredBy": {device_id: {...}}
+            offered_by = folder_data.get("offeredBy", folder_data)
             # Check if this folder is offered by the device we just accepted
-            if device_id not in device_map:
+            if device_id not in offered_by:
                 continue
 
             team_name = m.group(1)
@@ -176,9 +178,10 @@ async def list_pending_folders(client=Depends(get_syncthing_client)):
         return {"folders": []}
 
     folders = []
-    for folder_id, device_map in raw.items():
+    for folder_id, folder_data in raw.items():
         parsed = _parse_folder_id(folder_id)
-        # device_map is {device_id: {time, label, ...}}
+        # Syncthing nests under "offeredBy": {device_id: {time, label, ...}}
+        device_map = folder_data.get("offeredBy", folder_data)
         for dev_id, info in device_map.items():
             folders.append({
                 "folder_id": folder_id,
@@ -205,12 +208,13 @@ async def accept_pending_folder(
     except Exception as e:
         raise HTTPException(500, f"Failed to fetch pending folders: {e}")
 
-    device_info = raw.get(folder_id)
-    if not device_info:
+    folder_data = raw.get(folder_id)
+    if not folder_data:
         raise HTTPException(404, f"Pending folder '{folder_id}' not found")
 
-    # Get the first offering device
-    device_ids = list(device_info.keys())
+    # Syncthing nests under "offeredBy": {device_id: {...}}
+    offered_by = folder_data.get("offeredBy", folder_data)
+    device_ids = list(offered_by.keys())
     if not device_ids:
         raise HTTPException(404, f"No offering device found for folder '{folder_id}'")
 
