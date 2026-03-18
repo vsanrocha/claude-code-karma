@@ -122,23 +122,44 @@ async def trigger_reconciliation(
 @router.get("/detect")
 async def sync_detect():
     """Detect whether Syncthing is installed and running."""
+    import shutil
+
+    syncthing_installed = shutil.which("syncthing") is not None
+
     try:
         from karma.syncthing import read_local_api_key
         from services.syncthing.client import SyncthingClient
 
         api_key = read_local_api_key()
         if not api_key:
-            return {"running": False, "reason": "no_api_key"}
+            return {
+                "syncthing_installed": syncthing_installed,
+                "syncthing_running": False,
+                "api_key_found": False,
+                "device_id": None,
+                "running": False,
+                "version": None,
+            }
 
         client = SyncthingClient(api_url="http://localhost:8384", api_key=api_key)
         status = await client.get_system_status()
         return {
-            "running": True,
+            "syncthing_installed": syncthing_installed,
+            "syncthing_running": True,
+            "api_key_found": True,
             "device_id": status.get("myID"),
+            "running": True,
             "version": status.get("version"),
         }
     except Exception:
-        return {"running": False}
+        return {
+            "syncthing_installed": syncthing_installed,
+            "syncthing_running": False,
+            "api_key_found": False,
+            "device_id": None,
+            "running": False,
+            "version": None,
+        }
 
 
 @router.post("/reset")

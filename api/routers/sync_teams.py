@@ -70,10 +70,29 @@ async def create_team(
 
 @router.get("/teams")
 async def list_teams(conn: sqlite3.Connection = Depends(get_conn)):
-    """List all teams."""
+    """List all teams with member/project counts."""
     repos = make_repos()
     teams = repos["teams"].list_all(conn)
-    return {"teams": [_team_dict(t) for t in teams]}
+    result = []
+    for t in teams:
+        members = repos["members"].list_for_team(conn, t.name)
+        projects = repos["projects"].list_for_team(conn, t.name)
+        result.append({
+            **_team_dict(t),
+            "member_count": len(members),
+            "project_count": len(projects),
+            "members": [_member_dict(m) for m in members],
+            "projects": [
+                {
+                    "git_identity": p.git_identity,
+                    "encoded_name": p.encoded_name,
+                    "folder_suffix": p.folder_suffix,
+                    "status": p.status.value,
+                }
+                for p in projects
+            ],
+        })
+    return {"teams": result}
 
 
 @router.get("/teams/{name}")
