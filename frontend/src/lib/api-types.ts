@@ -1724,26 +1724,36 @@ export interface HookScriptDetail {
 // ============================================
 
 export interface SyncDetect {
-	installed: boolean;
-	running: boolean;
-	version: string | null;
+	syncthing_installed: boolean;
+	syncthing_running: boolean;
+	api_key_found: boolean;
 	device_id: string | null;
-}
-
-export interface SyncStatusTeamEntry {
-	backend: 'syncthing';
-	member_count: number;
-	project_count: number;
+	/** @deprecated v3 compat */
+	installed?: boolean;
+	/** @deprecated v3 compat */
+	running?: boolean;
+	/** @deprecated v3 compat */
+	version?: string | null;
 }
 
 export interface SyncStatusResponse {
 	configured: boolean;
 	user_id?: string;
+	machine_tag?: string;
+	member_tag?: string;
+	syncthing?: {
+		installed: boolean;
+		running: boolean;
+		device_id: string | null;
+	};
+	teams?: SyncTeam[];
+	/** @deprecated v3 compat */
 	machine_id?: string;
+	/** @deprecated v3 compat */
 	device_id?: string | null;
-	teams?: Record<string, SyncStatusTeamEntry>;
 }
 
+/** @deprecated kept for backward compat — use SyncDetect fields directly */
 export interface SyncDevice {
 	device_id: string;
 	name: string;
@@ -1756,6 +1766,7 @@ export interface SyncDevice {
 	is_self?: boolean;
 }
 
+/** @deprecated kept for backward compat */
 export interface SyncProject {
 	name: string;
 	encoded_name: string;
@@ -1767,42 +1778,93 @@ export interface SyncProject {
 	pending_count: number;
 }
 
-// --- New sync types for redesign ---
+// --- V4 sync types ---
 
 export type SyncSessionLimit = 'all' | 'recent_100' | 'recent_10';
 
 export interface SyncTeam {
 	name: string;
-	backend: 'syncthing';
-	projects: SyncTeamProject[];
-	members: SyncTeamMember[];
+	leader_member_tag: string;
+	status: 'active' | 'dissolved';
+	created_at: string;
+	members?: SyncTeamMember[];
+	projects?: SyncTeamProject[];
+	subscriptions?: SyncSubscription[];
+	/** @deprecated v3 compat */
+	backend?: 'syncthing';
+	/** @deprecated v3 compat */
 	member_count?: number;
+	/** @deprecated v3 compat */
 	project_count?: number;
+	/** @deprecated v3 compat */
 	sync_session_limit?: SyncSessionLimit;
 }
 
 export interface SyncTeamProject {
-	name: string;
-	encoded_name: string;
-	path: string;
-	local_count: number;
-	packaged_count: number;
-	received_counts: Record<string, number>;
-	gap: number;
+	git_identity: string;
+	encoded_name: string | null;
+	folder_suffix: string;
+	status: 'shared' | 'removed';
+	/** @deprecated v3 compat */
+	name?: string;
+	/** @deprecated v3 compat */
+	path?: string;
+	/** @deprecated v3 compat */
+	local_count?: number;
+	/** @deprecated v3 compat */
+	packaged_count?: number;
+	/** @deprecated v3 compat */
+	received_counts?: Record<string, number>;
+	/** @deprecated v3 compat */
+	gap?: number;
+	/** @deprecated v3 compat */
 	teams?: string[];
 }
 
-/** Per-project sync status (alias for SyncTeamProject) */
+/** Per-project sync status — v3 alias kept for compat */
 export type SyncProjectStatus = SyncTeamProject;
 
 export interface SyncTeamMember {
-	name: string;
+	member_tag: string;
 	device_id: string;
-	connected: boolean;
-	in_bytes_total: number;
-	out_bytes_total: number;
+	user_id: string;
+	machine_tag: string;
+	status: 'added' | 'active' | 'removed';
+	/** @deprecated v3 compat */
+	name?: string;
+	/** @deprecated v3 compat */
+	connected?: boolean;
+	/** @deprecated v3 compat */
+	in_bytes_total?: number;
+	/** @deprecated v3 compat */
+	out_bytes_total?: number;
 }
 
+export interface SyncSubscription {
+	member_tag: string;
+	team_name: string;
+	project_git_identity: string;
+	status: 'offered' | 'accepted' | 'paused' | 'declined';
+	direction: 'send' | 'receive' | 'both';
+}
+
+export interface SyncEvent {
+	event_type: string;
+	team_name: string;
+	member_tag?: string;
+	detail?: Record<string, unknown>;
+	created_at: string;
+	/** @deprecated v3 compat */
+	id?: number;
+	/** @deprecated v3 compat */
+	member_name?: string | null;
+	/** @deprecated v3 compat */
+	project_encoded_name?: string | null;
+	/** @deprecated v3 compat */
+	session_uuid?: string | null;
+}
+
+/** @deprecated kept for v3 compat */
 export interface SyncWatchStatus {
 	running: boolean;
 	team: string | null;
@@ -1811,12 +1873,14 @@ export interface SyncWatchStatus {
 	projects_watched: string[];
 }
 
+/** @deprecated kept for v3 compat */
 export interface SyncPendingDevice {
 	device_id: string;
 	member: string;
 	folder_id: string;
 }
 
+/** @deprecated kept for v3 compat */
 export interface SyncPendingFolder {
 	folder_id: string;
 	from_device: string;
@@ -1826,21 +1890,9 @@ export interface SyncPendingFolder {
 	label: string;
 	description: string;
 	folder_type: 'handshake' | 'sessions' | 'outbox' | 'unknown';
-	/** When multiple devices offer the same project, entries are grouped. */
 	folder_ids?: string[];
 	device_count?: number;
 	devices?: SyncPendingDevice[];
-}
-
-export interface SyncEvent {
-	id: number;
-	event_type: string;
-	team_name: string | null;
-	member_name: string | null;
-	project_encoded_name: string | null;
-	session_uuid: string | null;
-	detail: string | null;
-	created_at: string;
 }
 
 export interface TeamSessionStat {
@@ -1909,11 +1961,18 @@ export interface JoinTeamResponse {
 }
 
 export interface JoinCodeResponse {
-	join_code: string;
-	team_name: string;
-	user_id: string;
+	code: string;
+	member_tag: string;
+	device_id: string;
+	/** @deprecated v3 compat */
+	join_code?: string;
+	/** @deprecated v3 compat */
+	team_name?: string;
+	/** @deprecated v3 compat */
+	user_id?: string;
 }
 
+/** @deprecated kept for v3 compat */
 export interface PendingDevice {
 	device_id: string;
 	name: string;

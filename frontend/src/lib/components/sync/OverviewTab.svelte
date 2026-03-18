@@ -28,8 +28,10 @@
 	// Total members from DB (includes self) — more accurate than device count
 	let totalMembers = $derived.by(() => {
 		if (!teamName || !status?.teams) return 0;
-		const team = status.teams[teamName] as { member_count?: number } | undefined;
-		return team?.member_count ?? 0;
+		// v4: teams is an array of SyncTeam; v3: was Record<string, entry>
+		const teamsArr = Array.isArray(status.teams) ? status.teams : [];
+		const team = teamsArr.find((t: { name: string }) => t.name === teamName) as { member_count?: number; members?: unknown[] } | undefined;
+		return team?.member_count ?? team?.members?.length ?? 0;
 	});
 
 	// ── Per-Project Sync Status ──────────────────────────────────────────────

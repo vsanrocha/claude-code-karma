@@ -16,27 +16,20 @@
 		Users,
 		Contact,
 		FolderSync,
-		FolderGit2,
 		Loader2,
 		AlertTriangle,
-		CheckCircle2,
 		RefreshCw,
-		UserPlus,
-		Check,
-		X,
 		LayoutDashboard,
 		Activity,
 		Settings
 	} from 'lucide-svelte';
-	import { getTeamMemberHexColor } from '$lib/utils';
-	import type { SyncDevice, SyncPendingFolder, SyncProjectStatus, SyncTeam, SyncEvent, PendingDevice, TeamSessionStat } from '$lib/api-types';
+	import type { SyncTeam, SyncEvent } from '$lib/api-types';
 
 	let { data } = $props();
 
 	let deleteConfirm = $state(false);
 	let deleting = $state(false);
 	let deleteError = $state<string | null>(null);
-	let syncError = $state('');
 	let isRefreshing = $state(false);
 
 	// Tab state
@@ -51,206 +44,33 @@
 	});
 	let members = $derived(team?.members ?? []);
 	let projects = $derived(team?.projects ?? []);
-
-	// Per-project sync status
-	let projectStatuses = $state<SyncProjectStatus[]>([]);
-	$effect(() => {
-		projectStatuses = data.projectStatuses ?? [];
-	});
+	let subscriptions = $derived(team?.subscriptions ?? []);
 
 	// Activity feed
 	let activity = $state<SyncEvent[]>([]);
 	$effect(() => { activity = data.activity ?? []; });
 
-	// Session stats
-	let sessionStats = $state<TeamSessionStat[]>([]);
-	$effect(() => { sessionStats = data.sessionStats ?? []; });
-
-	// Polling state for connection status
-	let devices = $state<SyncDevice[]>([]);
-
-	// Pending folder offers for this team
-	let pendingFolders = $state<SyncPendingFolder[]>([]);
-	let acceptingFolders = $state(false);
-
-	// Sync from server data when it changes (e.g. after invalidateAll)
-	$effect(() => {
-		devices = data.devices ?? [];
-	});
-	$effect(() => {
-		pendingFolders = data.pendingFolders ?? [];
-	});
-
-	let userId = $derived(data.syncStatus?.user_id);
-	let sharedProjectNames = $derived(projects.map((p) => p.encoded_name));
-
-	function parseFolderLabel(offer: SyncPendingFolder): string {
-		if (offer.label) return offer.label;
-		const match = offer.folder_id.match(/^karma-(?:out|in)-[^-]+-(.+)$/);
-		if (match) return match[1];
-		return offer.folder_id;
-	}
-
-	// Track per-folder action state: folder_id -> 'accepting' | 'rejecting'
-	let folderActing = $state<Record<string, string>>({});
-
-	async function acceptAllFolders() {
-		acceptingFolders = true;
-		try {
-			await fetch(`${API_BASE}/sync/pending/accept`, { method: 'POST' });
-			invalidateAll();
-		} finally {
-			acceptingFolders = false;
-		}
-	}
-
-	async function acceptFolder(folderId: string, allFolderIds?: string[]) {
-		const ids = allFolderIds ?? [folderId];
-		for (const id of ids) {
-			folderActing = { ...folderActing, [id]: 'accepting' };
-		}
-		try {
-			let anyFailed = false;
-			for (const id of ids) {
-				const res = await fetch(`${API_BASE}/sync/pending/accept/${encodeURIComponent(id)}`, { method: 'POST' });
-				if (!res.ok) anyFailed = true;
-			}
-			if (!anyFailed) {
-				await fetchTeamData();
-			} else {
-				for (const id of ids) folderActing = { ...folderActing, [id]: 'error' };
-				return;
-			}
-		} catch {
-			for (const id of ids) folderActing = { ...folderActing, [id]: 'error' };
-			return;
-		}
-		const updated = { ...folderActing };
-		for (const id of ids) delete updated[id];
-		folderActing = updated;
-	}
-
-	async function rejectFolder(folderId: string, allFolderIds?: string[]) {
-		const ids = allFolderIds ?? [folderId];
-		for (const id of ids) {
-			folderActing = { ...folderActing, [id]: 'rejecting' };
-		}
-		try {
-			let anyFailed = false;
-			for (const id of ids) {
-				const res = await fetch(`${API_BASE}/sync/pending/reject/${encodeURIComponent(id)}`, { method: 'POST' });
-				if (!res.ok) anyFailed = true;
-			}
-			if (!anyFailed) {
-				await fetchTeamData();
-			} else {
-				for (const id of ids) folderActing = { ...folderActing, [id]: 'error' };
-				return;
-			}
-		} catch {
-			for (const id of ids) folderActing = { ...folderActing, [id]: 'error' };
-			return;
-		}
-		const updated = { ...folderActing };
-		for (const id of ids) delete updated[id];
-		folderActing = updated;
-	}
-
-	// Pending device requests
-	let pendingDevices = $state<PendingDevice[]>([]);
-	$effect(() => {
-		pendingDevices = data.pendingDevices ?? [];
-	});
-
-	// Track per-device accept state
-	let deviceActing = $state<Record<string, string>>({});
-
-	async function acceptDevice(device: PendingDevice) {
-		deviceActing = { ...deviceActing, [device.device_id]: 'accepting' };
-		try {
-			const res = await fetch(
-				`${API_BASE}/sync/pending-devices/${encodeURIComponent(device.device_id)}/accept`,
-				{
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ team_name: data.teamName })
-				}
-			);
-			if (res.ok) {
-				pendingDevices = pendingDevices.filter((d) => d.device_id !== device.device_id);
-				await fetchTeamData();
-			} else {
-				deviceActing = { ...deviceActing, [device.device_id]: 'error' };
-			}
-		} catch {
-			deviceActing = { ...deviceActing, [device.device_id]: 'error' };
-		}
-	}
-
-	async function dismissDevice(deviceId: string) {
-		deviceActing = { ...deviceActing, [deviceId]: 'dismissing' };
-		try {
-			await fetch(
-				`${API_BASE}/sync/pending-devices/${encodeURIComponent(deviceId)}`,
-				{ method: 'DELETE' }
-			);
-		} catch {
-			// best-effort — remove from UI regardless
-		}
-		pendingDevices = pendingDevices.filter((d) => d.device_id !== deviceId);
-		const { [deviceId]: _, ...rest } = deviceActing;
-		deviceActing = rest;
-	}
+	let memberTag = $derived(data.syncStatus?.member_tag);
 
 	// Fetch all team data (used by both polling and manual refresh)
 	async function fetchTeamData(signal?: AbortSignal) {
 		const teamNameEnc = encodeURIComponent(data.teamName);
-		// pending-devices triggers auto-accept of karma peers, must resolve before teams fetch
-		const pendingDevicesRes = await fetch(`${API_BASE}/sync/pending-devices`, { signal }).catch(() => null);
-		if (pendingDevicesRes?.ok) {
-			const pd = await pendingDevicesRes.json();
-			pendingDevices = pd.devices ?? [];
-		}
-		const [teamsRes, devicesRes, foldersRes, projectStatusRes, activityRes, sessionStatsRes] = await Promise.all([
-			fetch(`${API_BASE}/sync/teams`, { signal }),
-			fetch(`${API_BASE}/sync/devices`, { signal }),
-			fetch(`${API_BASE}/sync/pending`, { signal }),
-			fetch(`${API_BASE}/sync/teams/${teamNameEnc}/project-status`, { signal }),
-			fetch(`${API_BASE}/sync/teams/${teamNameEnc}/activity?limit=20`, { signal }),
-			fetch(`${API_BASE}/sync/teams/${teamNameEnc}/session-stats?days=30`, { signal })
+		const [teamRes, activityRes] = await Promise.all([
+			fetch(`${API_BASE}/sync/teams/${teamNameEnc}`, { signal }),
+			fetch(`${API_BASE}/sync/teams/${teamNameEnc}/activity?limit=20`, { signal })
 		]);
 
-		if (teamsRes.ok) {
-			const td = await teamsRes.json();
-			const found = (td.teams ?? []).find((t: SyncTeam) => t.name === data.teamName);
-			if (found) team = found;
-		}
-		if (devicesRes.ok) {
-			const dd = await devicesRes.json();
-			devices = dd.devices ?? [];
-		}
-		if (foldersRes.ok) {
-			const fd = await foldersRes.json();
-			pendingFolders = (fd.pending ?? []).filter(
-				(f: SyncPendingFolder) =>
-					f.from_team === data.teamName && (f.folder_type === 'sessions' || f.folder_type === 'outbox')
-			);
-		}
-		if (projectStatusRes.ok) {
-			const ps = await projectStatusRes.json();
-			projectStatuses = ps.projects ?? [];
+		if (teamRes.ok) {
+			const td: SyncTeam = await teamRes.json();
+			team = td;
 		}
 		if (activityRes.ok) {
 			const ad = await activityRes.json();
 			activity = ad.events ?? [];
 		}
-		if (sessionStatsRes.ok) {
-			const ss = await sessionStatsRes.json();
-			sessionStats = ss.stats ?? [];
-		}
 	}
 
-	// Poll for team data, devices, pending folders, project status, and activity
+	// Poll for team data and activity
 	onMount(() => {
 		let controller = new AbortController();
 
@@ -306,7 +126,11 @@
 				window.location.href = '/team';
 			} else {
 				const body = await res.json().catch(() => ({}));
-				deleteError = body.detail || `Failed to leave team (${res.status})`;
+				if (res.status === 409) {
+					deleteError = 'Team is already dissolved.';
+				} else {
+					deleteError = body.detail || `Failed to leave team (${res.status})`;
+				}
 			}
 		} catch {
 			deleteError = 'Network error. Could not leave team.';
@@ -321,7 +145,6 @@
 		try {
 			await fetchTeamData();
 		} catch {
-			// fall back to invalidateAll on error
 			invalidateAll();
 		} finally {
 			isRefreshing = false;
@@ -341,211 +164,28 @@
 	]}
 >
 	{#snippet headerRight()}
-		<button
-			onclick={handleRefresh}
-			disabled={isRefreshing}
-			class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-[var(--radius-md)] border border-[var(--border)]
-				text-[var(--text-secondary)] hover:bg-[var(--bg-muted)] transition-colors
-				disabled:opacity-50 disabled:cursor-not-allowed"
-		>
-			<RefreshCw size={14} class={isRefreshing ? 'animate-spin' : ''} />
-			Refresh
-		</button>
+		<div class="flex items-center gap-2">
+			{#if team}
+				<span class="px-2 py-1 text-[11px] font-medium rounded-full
+					{team.status === 'active'
+						? 'bg-[var(--success)]/10 text-[var(--success)] border border-[var(--success)]/20'
+						: 'bg-[var(--error)]/10 text-[var(--error)] border border-[var(--error)]/20'}">
+					{team.status}
+				</span>
+			{/if}
+			<button
+				onclick={handleRefresh}
+				disabled={isRefreshing}
+				class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-[var(--radius-md)] border border-[var(--border)]
+					text-[var(--text-secondary)] hover:bg-[var(--bg-muted)] transition-colors
+					disabled:opacity-50 disabled:cursor-not-allowed"
+			>
+				<RefreshCw size={14} class={isRefreshing ? 'animate-spin' : ''} />
+				Refresh
+			</button>
+		</div>
 	{/snippet}
 </PageHeader>
-
-<!-- Pending Device Requests (above tabs) -->
-{#if pendingDevices.length > 0}
-	<section class="mb-6">
-		<div class="rounded-lg border border-[var(--border)] overflow-hidden bg-[var(--bg-base)]">
-			<div class="h-[3px] bg-[var(--accent)]"></div>
-
-			<!-- Header -->
-			<div class="flex items-center gap-2.5 px-5 py-3 border-b border-[var(--border)]/50">
-				<UserPlus size={15} class="text-[var(--accent)]" />
-				<h2 class="text-sm font-semibold text-[var(--text-primary)]">
-					Join Requests
-				</h2>
-				<span class="flex items-center justify-center min-w-[20px] h-5 px-1 text-[10px] font-bold rounded-full bg-[var(--accent)] text-white">
-					{pendingDevices.length}
-				</span>
-			</div>
-
-			<!-- Requests list -->
-			<div class="divide-y divide-[var(--border)]/50">
-				{#each pendingDevices as device (device.device_id)}
-					{@const acting = deviceActing[device.device_id]}
-					{@const name = device.name || 'Unknown device'}
-					{@const hexColor = getTeamMemberHexColor(name)}
-
-					<div class="flex items-center gap-4 px-5 py-4">
-						<!-- Avatar -->
-						<div
-							class="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold shrink-0"
-							style="background: {hexColor}; color: white;"
-						>
-							{name.charAt(0).toUpperCase()}
-						</div>
-
-						<!-- Info -->
-						<div class="flex-1 min-w-0">
-							<p class="text-sm font-medium text-[var(--text-primary)] truncate">
-								{name}
-							</p>
-							<p class="text-[11px] text-[var(--text-muted)] mt-0.5 font-mono">
-								{device.device_id.slice(0, 7)}&hellip;{device.device_id.slice(-4)}
-							</p>
-						</div>
-
-						<!-- Actions -->
-						<div class="flex items-center gap-2 shrink-0">
-							{#if acting === 'error'}
-								<span class="text-[11px] text-[var(--error)] mr-1">Failed</span>
-							{/if}
-							<button
-								onclick={() => acceptDevice(device)}
-								disabled={acting === 'accepting'}
-								class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md
-									bg-[var(--success)] text-white hover:bg-[var(--success)]/85 transition-colors
-									disabled:opacity-50 disabled:cursor-not-allowed"
-							>
-								{#if acting === 'accepting'}
-									<Loader2 size={12} class="animate-spin" />
-								{:else}
-									<Check size={12} />
-								{/if}
-								Approve
-							</button>
-							<button
-								onclick={() => dismissDevice(device.device_id)}
-								disabled={acting === 'accepting'}
-								class="px-2.5 py-1.5 text-xs font-medium rounded-md
-									text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-muted)] transition-colors
-									disabled:opacity-50"
-							>
-								Ignore
-							</button>
-						</div>
-					</div>
-				{/each}
-			</div>
-		</div>
-	</section>
-{/if}
-
-<!-- Pending Project Shares (above tabs) -->
-{#if pendingFolders.length > 0}
-	<section class="mb-6">
-		<div class="rounded-lg border border-[var(--border)] overflow-hidden bg-[var(--bg-base)]">
-			<div class="h-[3px] bg-[var(--warning)]"></div>
-
-			<!-- Header -->
-			<div class="flex items-center justify-between px-5 py-3 border-b border-[var(--border)]/50">
-				<div class="flex items-center gap-2.5">
-					<FolderSync size={15} class="text-[var(--warning)]" />
-					<h2 class="text-sm font-semibold text-[var(--text-primary)]">
-						Pending Session Shares
-					</h2>
-					<span class="flex items-center justify-center min-w-[20px] h-5 px-1 text-[10px] font-bold rounded-full bg-[var(--warning)] text-white">
-						{pendingFolders.length}
-					</span>
-				</div>
-				<button
-					onclick={acceptAllFolders}
-					disabled={acceptingFolders}
-					class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md
-						bg-[var(--success)] text-white hover:bg-[var(--success)]/85 transition-colors
-						disabled:opacity-50 disabled:cursor-not-allowed"
-				>
-					{#if acceptingFolders}
-						<Loader2 size={12} class="animate-spin" />
-						Accepting...
-					{:else}
-						<CheckCircle2 size={12} />
-						Accept All
-					{/if}
-				</button>
-			</div>
-
-			<!-- Shares list -->
-			<div class="divide-y divide-[var(--border)]/50">
-				{#each pendingFolders as offer (offer.folder_id + ':' + offer.from_device)}
-					{@const acting = folderActing[offer.folder_id]}
-					{@const isOutbox = offer.folder_type === 'outbox'}
-					{@const deviceCount = offer.device_count ?? 1}
-					{@const allIds = offer.folder_ids ?? [offer.folder_id]}
-
-					<div class="flex items-center gap-4 px-5 py-4">
-						<!-- Folder icon -->
-						<div
-							class="w-9 h-9 rounded-lg flex items-center justify-center shrink-0
-								{isOutbox
-									? 'bg-[var(--accent)]/10 text-[var(--accent)]'
-									: 'bg-[var(--warning)]/10 text-[var(--warning)]'}"
-						>
-							<FolderGit2 size={16} />
-						</div>
-
-						<!-- Info -->
-						<div class="flex-1 min-w-0">
-							<p class="text-sm font-medium text-[var(--text-primary)] truncate">
-								{offer.description || parseFolderLabel(offer)}
-							</p>
-							<p class="text-[11px] text-[var(--text-muted)] mt-0.5">
-								{#if isOutbox}
-									Start sending your sessions for this project
-								{:else if deviceCount > 1}
-									Receive sessions from <span class="font-medium text-[var(--text-secondary)]">{deviceCount} devices</span>
-								{:else}
-									Receive <span class="font-medium text-[var(--text-secondary)]">{offer.from_member}</span>'s sessions
-								{/if}
-							</p>
-						</div>
-
-						{#if deviceCount > 1}
-							<span class="flex items-center justify-center min-w-[20px] h-5 px-1.5 text-[10px] font-bold rounded-full bg-[var(--bg-muted)] text-[var(--text-secondary)]">
-								{deviceCount}x
-							</span>
-						{/if}
-
-						<!-- Actions -->
-						<div class="flex items-center gap-2 shrink-0">
-							<button
-								onclick={() => acceptFolder(offer.folder_id, allIds)}
-								disabled={!!acting}
-								aria-label="Accept project share"
-								class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md
-									bg-[var(--success)] text-white hover:bg-[var(--success)]/85 transition-colors
-									disabled:opacity-50 disabled:cursor-not-allowed"
-							>
-								{#if acting === 'accepting'}
-									<Loader2 size={12} class="animate-spin" />
-								{:else}
-									<Check size={12} />
-								{/if}
-								Accept
-							</button>
-							<button
-								onclick={() => rejectFolder(offer.folder_id, allIds)}
-								disabled={!!acting}
-								aria-label="Reject project share"
-								class="px-2.5 py-1.5 text-xs font-medium rounded-md
-									text-[var(--text-muted)] hover:text-[var(--error)] hover:bg-[var(--error)]/5 transition-colors
-									disabled:opacity-50"
-							>
-								{#if acting === 'rejecting'}
-									<Loader2 size={12} class="animate-spin" />
-								{:else}
-									Reject
-								{/if}
-							</button>
-						</div>
-					</div>
-				{/each}
-			</div>
-		</div>
-	</section>
-{/if}
 
 {#if team}
 	<Tabs.Root bind:value={activeTab} class="space-y-6">
@@ -562,8 +202,6 @@
 				{team}
 				teamName={data.teamName}
 				joinCode={data.joinCode}
-				{projectStatuses}
-				{sessionStats}
 				{deleteConfirm}
 				{deleting}
 				{deleteError}
@@ -577,10 +215,7 @@
 			<TeamMembersTab
 				{members}
 				teamName={data.teamName}
-				{devices}
-				{userId}
-				{sessionStats}
-				detectData={data.detectData}
+				{memberTag}
 				onrefresh={handleRefresh}
 			/>
 		</Tabs.Content>
@@ -589,10 +224,9 @@
 			<TeamProjectsTab
 				{projects}
 				teamName={data.teamName}
-				{projectStatuses}
+				{subscriptions}
+				{memberTag}
 				allProjects={data.allProjects}
-				{sharedProjectNames}
-				syncSessionLimit={data.team?.sync_session_limit ?? 'all'}
 				onrefresh={handleRefresh}
 			/>
 		</Tabs.Content>
@@ -601,7 +235,6 @@
 			<TeamActivityTab
 				teamName={data.teamName}
 				{activity}
-				{sessionStats}
 				{members}
 			/>
 		</Tabs.Content>

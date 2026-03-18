@@ -9,8 +9,6 @@ import type { SyncEvent } from '$lib/api-types';
 
 /**
  * Event metadata used for rendering (color, label).
- * The `icon` property from the old TeamActivityFeed map has been removed —
- * callers should use lucide-svelte icons directly based on event_type.
  */
 export const SYNC_EVENT_META: Record<string, { color: string; label: string }> = {
 	team_created: { color: 'text-[var(--success)]', label: 'created the team' },
@@ -35,30 +33,26 @@ export const SYNC_EVENT_META: Record<string, { color: string; label: string }> =
 	watcher_stopped: { color: 'text-[var(--warning)]', label: 'watcher stopped' },
 	watch_started: { color: 'text-[var(--success)]', label: 'watcher started' },
 	watch_stopped: { color: 'text-[var(--warning)]', label: 'watcher stopped' },
+	subscription_accepted: { color: 'text-[var(--success)]', label: 'accepted subscription' },
+	subscription_paused: { color: 'text-[var(--warning)]', label: 'paused subscription' },
+	subscription_resumed: { color: 'text-[var(--success)]', label: 'resumed subscription' },
+	subscription_declined: { color: 'text-[var(--error)]', label: 'declined subscription' },
 };
 
 /**
  * Returns a human-readable description for a SyncEvent.
  *
- * Produces rich descriptions with structured detail parsing (e.g. session counts,
- * folder counts, sync limit labels) and project name suffixes where applicable.
- *
- * This merges the logic from:
- * - OverviewTab.svelte `humanizeEvent()` (simple switch on event_type)
- * - TeamActivityFeed.svelte `describeEvent()` (richer, detail-aware)
- *
- * The richer TeamActivityFeed version is preferred as it's more informative.
+ * Handles both v3 (member_name, string detail) and v4 (member_tag, Record detail) shapes.
  */
 export function formatSyncEvent(ev: SyncEvent): string {
 	const meta = SYNC_EVENT_META[ev.event_type];
-	const actor = ev.member_name || 'System';
+	// v4 uses member_tag, v3 uses member_name
+	const actor = ev.member_tag || ev.member_name || 'System';
 	const team = ev.team_name ?? 'team';
 
-	// For a handful of event types, use the simple member+team phrasing from OverviewTab
-	// when there's no meta entry (i.e. they fall through to the default case).
 	const base = meta ? `${actor} ${meta.label}` : `${actor}: ${ev.event_type.replace(/_/g, ' ')}`;
 
-	// Simple overrides for team-level events that read more naturally with the team name
+	// Simple overrides for team-level events
 	switch (ev.event_type) {
 		case 'watch_started':
 			return `Session watcher started for ${team}`;
@@ -69,11 +63,10 @@ export function formatSyncEvent(ev: SyncEvent): string {
 		case 'team_deleted':
 			return `Team ${team} deleted`;
 		case 'pending_accepted':
-			// Fall through to detail parsing below (which may add folder count)
 			break;
 	}
 
-	// Parse structured detail field
+	// Parse structured detail field (v4: already a Record, v3: JSON string)
 	let detail = '';
 	if (ev.detail) {
 		try {
@@ -92,14 +85,18 @@ export function formatSyncEvent(ev: SyncEvent): string {
 					recent_100: 'Recent 100',
 					recent_10: 'Recent 10'
 				};
-				detail = ` → ${labels[d.sync_session_limit] || d.sync_session_limit}`;
+				detail = ` -> ${labels[d.sync_session_limit] || d.sync_session_limit}`;
+			} else if (ev.event_type === 'subscription_accepted' && d.direction) {
+				detail = ` (${d.direction})`;
+			} else if (d.git_identity) {
+				detail = ` for ${d.git_identity}`;
 			}
 		} catch {
 			/* ignore parse errors */
 		}
 	}
 
-	// Append project name suffix where relevant
+	// Append project name suffix where relevant (v3 compat)
 	if (
 		ev.project_encoded_name &&
 		!['settings_changed', 'pending_accepted'].includes(ev.event_type)

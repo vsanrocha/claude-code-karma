@@ -26,7 +26,7 @@
 			const res = await fetch(`${API_BASE}/sync/teams`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ name: teamName, backend: 'syncthing' })
+				body: JSON.stringify({ name: teamName })
 			});
 
 			if (!res.ok) {

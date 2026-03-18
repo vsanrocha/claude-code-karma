@@ -20,6 +20,9 @@
 	let confirmRemove = $state(false);
 	let removing = $state(false);
 
+	// Display name: prefer user_id, then name (v3 compat), then member_tag
+	let displayName = $derived(member.user_id || member.name || member.member_tag);
+
 	// Enrich with live device connection data
 	let deviceInfo = $derived(devices.find((d) => d.device_id === member.device_id));
 	let isConnected = $derived(deviceInfo?.connected ?? member.connected ?? false);
@@ -29,8 +32,9 @@
 		removing = true;
 
 		try {
+			const tag = member.member_tag || member.name || '';
 			const res = await fetch(
-				`${API_BASE}/sync/teams/${encodeURIComponent(teamName)}/members/${encodeURIComponent(member.name)}`,
+				`${API_BASE}/sync/teams/${encodeURIComponent(teamName)}/members/${encodeURIComponent(tag)}`,
 				{ method: 'DELETE' }
 			);
 
@@ -56,15 +60,15 @@
 				? 'bg-[var(--success)]/10 text-[var(--success)]'
 				: 'bg-[var(--bg-muted)] text-[var(--text-muted)]'}"
 		>
-			{member.name.charAt(0).toUpperCase()}
+			{displayName.charAt(0).toUpperCase()}
 		</div>
 		<div>
 			<div class="flex items-center gap-2">
 				<a
-					href="/members/{encodeURIComponent(member.device_id || member.name)}"
+					href="/members/{encodeURIComponent(member.device_id || member.member_tag)}"
 					class="text-sm font-medium text-[var(--text-primary)] hover:text-[var(--accent)] transition-colors"
 				>
-					{member.name}
+					{displayName}
 					{#if isSelf}
 						<span class="text-xs text-[var(--text-muted)]">(you)</span>
 					{/if}
@@ -118,7 +122,7 @@
 					onclick={() => (confirmRemove = true)}
 					class="p-1.5 rounded text-[var(--text-muted)] hover:text-[var(--error)] hover:bg-[var(--error)]/10 transition-colors"
 					title="Remove member"
-					aria-label="Remove member {member.name}"
+					aria-label="Remove member {displayName}"
 				>
 					<Trash2 size={14} />
 				</button>

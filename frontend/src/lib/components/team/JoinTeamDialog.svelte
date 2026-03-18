@@ -4,8 +4,7 @@
 	import { goto } from '$app/navigation';
 	import { parseJoinCode } from '$lib/utils/join-code';
 	import { Loader2, CheckCircle2 } from 'lucide-svelte';
-	import type { JoinTeamResponse, MatchingProject } from '$lib/api-types';
-	import { FolderGit2 } from 'lucide-svelte';
+	import type { JoinTeamResponse } from '$lib/api-types';
 
 	let {
 		open = $bindable(false),
@@ -17,10 +16,8 @@
 
 	let joinCode = $state('');
 	let loading = $state(false);
-	let sharing = $state(false);
 	let error = $state<string | null>(null);
 	let joinResult = $state<JoinTeamResponse | null>(null);
-	let selectedProjects = $state<Set<string>>(new Set());
 
 	// Live-parse the join code as user types
 	let parsed = $derived.by(() => {
@@ -35,60 +32,63 @@
 		error = null;
 
 		try {
-			const res = await fetch(`${API_BASE}/sync/teams/join`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ join_code: joinCode.trim() })
-			});
+			// First validate the pairing code if the endpoint exists
+			// Then join the team using the appropriate endpoint
+			const trimmedCode = joinCode.trim();
+			const parsedCode = parseJoinCode(trimmedCode);
 
-			if (!res.ok) {
-				const data = await res.json().catch(() => ({}));
-				error = data.detail || `Failed to join team (${res.status})`;
+			if (!parsedCode) {
+				error = 'Invalid join code format';
 				return;
 			}
 
-			const result: JoinTeamResponse = await res.json();
-			joinResult = result;
-			// Pre-select all matching projects
-			selectedProjects = new Set(result.matching_projects?.map((p) => p.encoded_name) ?? []);
-			onjoined?.(result);
+			// If the code includes a team name, join that specific team
+			if (parsedCode.team) {
+				const res = await fetch(
+					`${API_BASE}/sync/teams/${encodeURIComponent(parsedCode.team)}/members`,
+					{
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ pairing_code: trimmedCode })
+					}
+				);
+
+				if (!res.ok) {
+					const data = await res.json().catch(() => ({}));
+					error = data.detail || `Failed to join team (${res.status})`;
+					return;
+				}
+
+				joinResult = {
+					ok: true,
+					team_name: parsedCode.team,
+					leader_name: parsedCode.user,
+					paired: true,
+					team_created: false,
+					matching_projects: []
+				};
+			} else {
+				// Fallback: use the legacy join endpoint
+				const res = await fetch(`${API_BASE}/sync/teams/join`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ join_code: trimmedCode })
+				});
+
+				if (!res.ok) {
+					const data = await res.json().catch(() => ({}));
+					error = data.detail || `Failed to join team (${res.status})`;
+					return;
+				}
+
+				joinResult = await res.json();
+			}
+
+			onjoined?.(joinResult!);
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Network error';
 		} finally {
 			loading = false;
-		}
-	}
-
-	function toggleProject(encodedName: string) {
-		const next = new Set(selectedProjects);
-		if (next.has(encodedName)) next.delete(encodedName);
-		else next.add(encodedName);
-		selectedProjects = next;
-	}
-
-	async function handleShareSelected() {
-		if (!joinResult || selectedProjects.size === 0) return;
-		sharing = true;
-		error = null;
-		try {
-			for (const proj of joinResult.matching_projects ?? []) {
-				if (!selectedProjects.has(proj.encoded_name)) continue;
-				const pathParts = proj.path.split('/');
-				const name = pathParts[pathParts.length - 1] || proj.encoded_name;
-				await fetch(
-					`${API_BASE}/sync/teams/${encodeURIComponent(joinResult.team_name)}/projects`,
-					{
-						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({ name: proj.encoded_name, path: proj.path })
-					}
-				);
-			}
-			handleGoToTeam();
-		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to share projects';
-		} finally {
-			sharing = false;
 		}
 	}
 
@@ -118,7 +118,7 @@
 							{#if joinResult.team_created}
 								Created team "{joinResult.team_name}" and connected to {joinResult.leader_name}
 							{:else}
-								Connected to {joinResult.leader_name}'s team
+								Joined {joinResult.team_name}
 							{/if}
 						</p>
 						<p class="text-[var(--text-secondary)] mt-0.5">
@@ -127,40 +127,9 @@
 					</div>
 				</div>
 
-				{#if joinResult.matching_projects && joinResult.matching_projects.length > 0}
-					<div class="space-y-2">
-						<p class="text-xs font-medium text-[var(--text-secondary)]">
-							These local projects match the team — share them to start syncing:
-						</p>
-						{#each joinResult.matching_projects as project (project.encoded_name)}
-							<label
-								class="flex items-center gap-3 p-3 rounded-lg border border-[var(--border)] bg-[var(--bg-base)]
-									cursor-pointer hover:bg-[var(--bg-subtle)] transition-colors"
-							>
-								<input
-									type="checkbox"
-									checked={selectedProjects.has(project.encoded_name)}
-									onchange={() => toggleProject(project.encoded_name)}
-									class="rounded border-[var(--border)] text-[var(--accent)] focus:ring-[var(--accent)]/40"
-								/>
-								<FolderGit2 size={16} class="text-[var(--text-muted)] shrink-0" />
-								<div class="flex-1 min-w-0">
-									<p class="text-sm font-medium text-[var(--text-primary)] truncate">
-										{project.path.split('/').pop() || project.encoded_name}
-									</p>
-									<p class="text-xs text-[var(--text-muted)] truncate">{project.path}</p>
-								</div>
-								<span class="text-xs text-[var(--text-muted)] shrink-0">
-									{project.session_count} session{project.session_count !== 1 ? 's' : ''}
-								</span>
-							</label>
-						{/each}
-					</div>
-				{:else}
-					<p class="text-xs text-[var(--text-muted)]">
-						No matching local projects found. You can share projects later from the team page.
-					</p>
-				{/if}
+				<p class="text-xs text-[var(--text-muted)]">
+					You can share projects from the team page.
+				</p>
 
 				{#if error}
 					<p class="text-xs text-[var(--error)]">{error}</p>
@@ -189,9 +158,11 @@
 					<div class="p-3 rounded-lg bg-[var(--bg-subtle)] border border-[var(--border)] space-y-1.5">
 						<p class="text-[11px] font-medium uppercase tracking-wider text-[var(--text-muted)]">Detected</p>
 						<div class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
-							<span class="text-[var(--text-muted)]">Team</span>
-							<span class="font-medium text-[var(--text-primary)]">{parsed.team}</span>
-							<span class="text-[var(--text-muted)]">Leader</span>
+							{#if parsed.team}
+								<span class="text-[var(--text-muted)]">Team</span>
+								<span class="font-medium text-[var(--text-primary)]">{parsed.team}</span>
+							{/if}
+							<span class="text-[var(--text-muted)]">User</span>
 							<span class="font-medium text-[var(--text-primary)]">{parsed.user}</span>
 							<span class="text-[var(--text-muted)]">Device</span>
 							<span class="font-mono text-xs text-[var(--text-secondary)]">{parsed.device}</span>
@@ -208,38 +179,13 @@
 
 	{#snippet footer()}
 		{#if joinResult}
-			{#if joinResult.matching_projects && joinResult.matching_projects.length > 0}
-				<button
-					onclick={handleGoToTeam}
-					class="px-4 py-2 text-sm font-medium rounded-[var(--radius-md)] text-[var(--text-secondary)]
-						hover:bg-[var(--bg-muted)] transition-colors"
-				>
-					Skip for Now
-				</button>
-				<button
-					onclick={handleShareSelected}
-					disabled={selectedProjects.size === 0 || sharing}
-					class="px-4 py-2 text-sm font-medium rounded-[var(--radius-md)] bg-[var(--accent)] text-white
-						hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-				>
-					{#if sharing}
-						<span class="flex items-center gap-2">
-							<Loader2 size={14} class="animate-spin" />
-							Sharing...
-						</span>
-					{:else}
-						Share {selectedProjects.size} Project{selectedProjects.size !== 1 ? 's' : ''}
-					{/if}
-				</button>
-			{:else}
-				<button
-					onclick={handleGoToTeam}
-					class="px-4 py-2 text-sm font-medium rounded-[var(--radius-md)] bg-[var(--accent)] text-white
-						hover:bg-[var(--accent-hover)] transition-colors"
-				>
-					Go to Team Page
-				</button>
-			{/if}
+			<button
+				onclick={handleGoToTeam}
+				class="px-4 py-2 text-sm font-medium rounded-[var(--radius-md)] bg-[var(--accent)] text-white
+					hover:bg-[var(--accent-hover)] transition-colors"
+			>
+				Go to Team Page
+			</button>
 		{:else}
 			<button
 				onclick={handleClose}

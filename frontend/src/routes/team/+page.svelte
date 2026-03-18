@@ -4,10 +4,10 @@
 	import TeamCard from '$lib/components/team/TeamCard.svelte';
 	import CreateTeamDialog from '$lib/components/team/CreateTeamDialog.svelte';
 	import JoinTeamDialog from '$lib/components/team/JoinTeamDialog.svelte';
-	import { Users, Plus, UserPlus, ArrowRight, Radio, FolderSync, Wifi, Contact } from 'lucide-svelte';
+	import { Users, Plus, UserPlus, ArrowRight, FolderSync, Contact } from 'lucide-svelte';
 	import { goto, invalidateAll } from '$app/navigation';
 	import { listNavigation } from '$lib/actions/listNavigation';
-	import type { JoinTeamResponse, PendingDevice, StatItem } from '$lib/api-types';
+	import type { JoinTeamResponse, StatItem } from '$lib/api-types';
 
 	let { data } = $props();
 
@@ -16,23 +16,18 @@
 
 	let configured = $derived(data.syncStatus?.configured ?? false);
 	let teams = $derived(data.teams ?? []);
-	let pendingDevices = $state<PendingDevice[]>([]);
 
 	// Aggregate stats across all teams
 	let totalMembers = $derived(teams.reduce((sum, t) => sum + (t.members?.length ?? t.member_count ?? 0), 0));
-	let onlineMembers = $derived(teams.reduce((sum, t) => sum + (t.members?.filter(m => m.connected).length ?? 0), 0));
+	let activeMembers = $derived(teams.reduce((sum, t) => sum + (t.members?.filter(m => m.status === 'active').length ?? 0), 0));
 	let totalProjects = $derived(teams.reduce((sum, t) => sum + (t.projects?.length ?? t.project_count ?? 0), 0));
 
 	let stats = $derived<StatItem[]>([
 		{ title: 'Teams', value: teams.length, icon: Users, color: 'purple' },
 		{ title: 'Members', value: totalMembers, icon: Contact, color: 'rose' },
-		{ title: 'Online', value: onlineMembers, icon: Wifi, color: 'green' },
+		{ title: 'Active', value: activeMembers, icon: Users, color: 'green' },
 		{ title: 'Projects Synced', value: totalProjects, icon: FolderSync, color: 'blue' }
 	]);
-
-	$effect(() => {
-		pendingDevices = data.pendingDevices ?? [];
-	});
 
 	async function handleTeamCreated(teamName: string) {
 		if (teamName) {
@@ -43,8 +38,6 @@
 	}
 
 	function handleTeamJoined(result: JoinTeamResponse) {
-		// Stay on dialog to show the "share your code back" CTA
-		// Navigation happens when they close the dialog
 		invalidateAll();
 	}
 </script>
@@ -104,23 +97,6 @@
 			</a>
 		</div>
 	{:else if teams.length === 0}
-		<!-- Pending connections banner (points to Join Team) -->
-		{#if pendingDevices.length > 0}
-			<div class="p-4 rounded-lg border border-[var(--warning)]/20 bg-[var(--warning)]/5 mb-8">
-				<div class="flex items-center gap-3">
-					<Radio size={16} class="text-[var(--warning)] shrink-0" />
-					<div class="flex-1 min-w-0">
-						<p class="text-sm font-medium text-[var(--text-primary)]">
-							{pendingDevices.length} device{pendingDevices.length > 1 ? 's' : ''} waiting to connect
-						</p>
-						<p class="text-xs text-[var(--text-muted)] mt-0.5">
-							Create or join a team to accept incoming connections.
-						</p>
-					</div>
-				</div>
-			</div>
-		{/if}
-
 		<!-- State 2: No teams yet -->
 		<div class="flex flex-col items-center justify-center py-16 text-center">
 			<div
@@ -153,27 +129,11 @@
 			</div>
 		</div>
 	{:else}
-		<!-- Pending connections banner (directs to team detail page) -->
-		{#if pendingDevices.length > 0}
-			<div class="p-3 rounded-lg border border-[var(--warning)]/20 bg-[var(--warning)]/5 mb-4">
-				<div class="flex items-center gap-3">
-					<Radio size={16} class="text-[var(--warning)] shrink-0" />
-					<p class="text-sm text-[var(--text-primary)] flex-1">
-						<span class="font-medium">{pendingDevices.length} pending request{pendingDevices.length > 1 ? 's' : ''}</span>
-						<span class="text-[var(--text-muted)]"> — open your team to review and accept.</span>
-					</p>
-				</div>
-			</div>
-		{/if}
-
 		<!-- Stats overview -->
 		<StatsGrid {stats} columns={4} />
 
 		<!-- Quick links -->
 		<div class="flex items-center gap-4 text-xs text-[var(--text-muted)]">
-			<a href="/members" class="hover:text-[var(--accent)] transition-colors">
-				View all members &rarr;
-			</a>
 			<a href="/sync" class="hover:text-[var(--accent)] transition-colors">
 				Sync status &rarr;
 			</a>

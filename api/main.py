@@ -37,6 +37,7 @@ from routers import (  # noqa: E402
     skills,
     subagent_sessions,
     sync_pairing,
+    sync_pending,
     sync_projects,
     sync_system,
     sync_teams,
@@ -200,6 +201,7 @@ app.include_router(sync_system.router)
 app.include_router(sync_teams.router)
 app.include_router(sync_projects.router)
 app.include_router(sync_pairing.router)
+app.include_router(sync_pending.router)
 app.include_router(admin.router)
 
 

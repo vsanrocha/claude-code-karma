@@ -1,44 +1,24 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
 	import {
-		Chart,
-		BarController,
-		BarElement,
-		LinearScale,
-		CategoryScale,
-		Tooltip,
-		Legend
-	} from 'chart.js';
-	import { Users, FolderSync, ArrowUpDown, AlertTriangle, Loader2, RefreshCw } from 'lucide-svelte';
+		Users,
+		FolderSync,
+		AlertTriangle,
+		Loader2,
+		Calendar,
+		Crown
+	} from 'lucide-svelte';
 	import type {
 		SyncTeam,
-		SyncProjectStatus,
-		TeamSessionStat,
+		JoinCodeResponse,
 		StatItem
 	} from '$lib/api-types';
 	import JoinCodeCard from './JoinCodeCard.svelte';
 	import StatsGrid from '$lib/components/StatsGrid.svelte';
-	import { API_BASE } from '$lib/config';
-	import { invalidateAll } from '$app/navigation';
-	import {
-		registerChartDefaults,
-		createResponsiveConfig,
-		createCommonScaleConfig,
-		getThemeColors,
-		onThemeChange
-	} from '$lib/components/charts/chartConfig';
-	import { getTeamMemberHexColor } from '$lib/utils';
-
-	// Register Chart.js components
-	Chart.register(BarController, BarElement, LinearScale, CategoryScale, Tooltip, Legend);
 
 	interface Props {
 		team: SyncTeam;
 		teamName: string;
-		joinCode: string | null;
-		projectStatuses: SyncProjectStatus[];
-		sessionStats: TeamSessionStat[];
-		userNames?: Record<string, string>;
+		joinCode: JoinCodeResponse | null;
 		onleave: () => void;
 		deleteConfirm: boolean;
 		deleting: boolean;
@@ -51,9 +31,6 @@
 		team,
 		teamName,
 		joinCode,
-		projectStatuses,
-		sessionStats,
-		userNames,
 		onleave,
 		deleteConfirm,
 		deleting,
@@ -62,214 +39,86 @@
 		ondeleteerror
 	}: Props = $props();
 
-	let syncActing = $state(false);
-
-	async function syncTeamNow() {
-		syncActing = true;
-		try {
-			const res = await fetch(
-				`${API_BASE}/sync/teams/${encodeURIComponent(teamName)}/sync-now`,
-				{ method: 'POST' }
-			);
-			if (res.ok) {
-				invalidateAll();
-			}
-		} catch {
-			// best-effort
-		} finally {
-			syncActing = false;
-		}
-	}
-
-	let canvas = $state<HTMLCanvasElement>(undefined!);
-	let chart: Chart | null = null;
-
 	// Derived state
 	let members = $derived(team.members ?? []);
 	let projects = $derived(team.projects ?? []);
-	let onlineCount = $derived(members.filter((m) => m.connected).length);
-	let totalUnsyncedSessions = $derived(projectStatuses.reduce((sum, p) => sum + (p.gap ?? 0), 0));
+	let activeCount = $derived(members.filter((m) => m.status === 'active').length);
+	let sharedProjects = $derived(projects.filter((p) => p.status === 'shared').length);
 
-	// Aggregate session stats by member: out = what they contributed
-	let memberTotals = $derived.by(() => {
-		const totals = new Map<string, number>();
-		for (const stat of sessionStats) {
-			const existing = totals.get(stat.member_name) ?? 0;
-			totals.set(stat.member_name, existing + stat.packaged + stat.received);
+	// Format created_at date
+	let createdDate = $derived.by(() => {
+		if (!team.created_at) return null;
+		try {
+			return new Date(team.created_at).toLocaleDateString('en-US', {
+				month: 'short',
+				day: 'numeric',
+				year: 'numeric'
+			});
+		} catch {
+			return null;
 		}
-		return totals;
 	});
-
-	let totalSessions = $derived(
-		[...memberTotals.values()].reduce((sum, t) => sum + t, 0)
-	);
 
 	// Stats for StatsGrid
 	let stats = $derived<StatItem[]>([
 		{
-			title: 'Members (Online)',
-			value: `${onlineCount}/${members.length}`,
-			description: '',
+			title: 'Members',
+			value: `${activeCount}/${members.length}`,
+			description: 'active',
 			icon: Users,
 			color: 'green'
 		},
 		{
-			title: 'Unsynced Sessions',
-			value: totalUnsyncedSessions,
-			description: `across ${projects.length} project${projects.length !== 1 ? 's' : ''}`,
+			title: 'Projects',
+			value: sharedProjects,
+			description: `${projects.length} total`,
 			icon: FolderSync,
-			color: totalUnsyncedSessions === 0 ? 'green' : 'orange'
-		},
-		{
-			title: 'Sessions Shared',
-			value: totalSessions,
-			description: `across ${members.length} member${members.length !== 1 ? 's' : ''}`,
-			icon: ArrowUpDown,
-			color: 'accent'
+			color: 'blue'
 		}
 	]);
-
-	// Chart data: sessions contributed per member
-	let chartMemberIds = $derived([...memberTotals.keys()]);
-	let chartLabels = $derived(
-		chartMemberIds.map((name) => userNames?.[name] ?? name)
-	);
-	let chartOutData = $derived(chartMemberIds.map((id) => memberTotals.get(id) ?? 0));
-
-	let themeVersion = $state(0);
-	let cleanupTheme: (() => void) | null = null;
-
-	onMount(() => {
-		registerChartDefaults();
-		cleanupTheme = onThemeChange(() => {
-			chart?.destroy();
-			chart = null;
-			registerChartDefaults();
-			themeVersion++;
-		});
-	});
-
-	onDestroy(() => {
-		cleanupTheme?.();
-		chart?.destroy();
-	});
-
-	// Create or update chart when canvas is available and data changes
-	$effect(() => {
-		void themeVersion; // re-run on theme change
-		if (!canvas || memberTotals.size === 0) return;
-
-		const barColors = chartMemberIds.map((id) => getTeamMemberHexColor(id));
-
-		if (!chart) {
-			const colors = getThemeColors();
-			const scaleConfig = createCommonScaleConfig();
-
-			chart = new Chart(canvas, {
-				type: 'bar',
-				data: {
-					labels: chartLabels,
-					datasets: [
-						{
-							label: 'Contributed',
-							data: chartOutData,
-							backgroundColor: barColors,
-							borderRadius: 4
-						}
-					]
-				},
-				options: {
-					...createResponsiveConfig(),
-					scales: {
-						...scaleConfig,
-						x: {
-							...scaleConfig.x,
-							ticks: {
-								...scaleConfig.x.ticks,
-								maxRotation: 45,
-								minRotation: 0
-							}
-						}
-					},
-					plugins: {
-						...createResponsiveConfig().plugins,
-						legend: { display: false },
-						tooltip: {
-							...createResponsiveConfig().plugins.tooltip,
-							backgroundColor: colors.bgBase,
-							titleColor: colors.text,
-							bodyColor: colors.textSecondary,
-							borderColor: colors.border,
-							borderWidth: 1,
-							displayColors: true
-						}
-					}
-				}
-			});
-		} else {
-			chart.data.labels = chartLabels;
-			chart.data.datasets[0].data = chartOutData;
-			chart.data.datasets[0].backgroundColor = barColors;
-			chart.update();
-		}
-	});
 </script>
 
 <div class="space-y-8">
-	<!-- Join Code -->
-	{#if joinCode}
-		<section>
-			<JoinCodeCard code={joinCode} />
-		</section>
-	{/if}
-
-	<!-- Sync Now -->
-	<section>
-		<div class="flex items-center justify-between p-4 rounded-lg border border-[var(--border)] bg-[var(--bg-subtle)]">
-			<div>
-				<p class="text-sm font-medium text-[var(--text-primary)]">
-					{#if totalUnsyncedSessions > 0}
-						{totalUnsyncedSessions} session{totalUnsyncedSessions !== 1 ? 's' : ''} not yet synced
-					{:else}
-						All sessions in sync
+	<!-- Team Info Card -->
+	<section class="rounded-lg border border-[var(--border)] bg-[var(--bg-subtle)] p-5">
+		<div class="flex items-start justify-between">
+			<div class="space-y-3">
+				<div class="flex items-center gap-3">
+					<h2 class="text-lg font-semibold text-[var(--text-primary)]">{team.name}</h2>
+					<span class="px-2 py-0.5 text-[11px] font-medium rounded-full
+						{team.status === 'active'
+							? 'bg-[var(--success)]/10 text-[var(--success)] border border-[var(--success)]/20'
+							: 'bg-[var(--error)]/10 text-[var(--error)] border border-[var(--error)]/20'}">
+						{team.status}
+					</span>
+				</div>
+				<div class="flex items-center gap-4 text-xs text-[var(--text-muted)]">
+					<span class="flex items-center gap-1.5">
+						<Crown size={12} class="text-[var(--warning)]" />
+						Leader: <span class="font-medium text-[var(--text-secondary)]">{team.leader_member_tag}</span>
+					</span>
+					{#if createdDate}
+						<span class="flex items-center gap-1.5">
+							<Calendar size={12} />
+							Created {createdDate}
+						</span>
 					{/if}
-				</p>
-				<p class="text-xs text-[var(--text-muted)] mt-0.5">Package and share unsynced sessions with your team</p>
+				</div>
 			</div>
-			<button
-				onclick={syncTeamNow}
-				disabled={syncActing}
-				class="flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-[var(--radius-md)]
-					bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] transition-colors
-					disabled:opacity-50 disabled:cursor-not-allowed"
-			>
-				{#if syncActing}
-					<Loader2 size={14} class="animate-spin" />
-					Syncing...
-				{:else}
-					<RefreshCw size={14} />
-					Sync Now
-				{/if}
-			</button>
 		</div>
 	</section>
 
-	<!-- Stats Row -->
-	<section>
-		<StatsGrid {stats} columns={3} />
-	</section>
-
-	<!-- Sessions by Member Chart -->
-	{#if memberTotals.size > 0}
+	<!-- Join Code -->
+	{#if joinCode}
 		<section>
-			<div class="rounded-lg border border-[var(--border)] bg-[var(--bg-subtle)] p-4">
-				<h3 class="text-sm font-medium text-[var(--text-primary)] mb-4">Sessions Contributed</h3>
-				<div class="h-[200px]">
-					<canvas bind:this={canvas}></canvas>
-				</div>
-			</div>
+			<JoinCodeCard code={joinCode.code} />
 		</section>
 	{/if}
+
+	<!-- Stats Row -->
+	<section>
+		<StatsGrid {stats} columns={2} />
+	</section>
 
 	<!-- Danger Zone (bottom, collapsible) -->
 	<section class="mt-12">

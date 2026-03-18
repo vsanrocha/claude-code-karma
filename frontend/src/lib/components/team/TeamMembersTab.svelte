@@ -1,74 +1,49 @@
 <script lang="ts">
 	import { API_BASE } from '$lib/config';
-	import { Wifi, WifiOff, Trash2, Loader2, ArrowUpDown, Settings } from 'lucide-svelte';
-	import type { SyncTeamMember, SyncDevice, TeamSessionStat } from '$lib/api-types';
-	import { getTeamMemberColor, getTeamMemberHexColor, formatBytes } from '$lib/utils';
-	import MemberSparkline from './MemberSparkline.svelte';
+	import { Trash2, Loader2 } from 'lucide-svelte';
+	import type { SyncTeamMember } from '$lib/api-types';
+	import { getTeamMemberColor, getTeamMemberHexColor } from '$lib/utils';
 
 	interface Props {
 		members: SyncTeamMember[];
 		teamName: string;
-		devices: SyncDevice[];
-		userId: string | undefined;
-		sessionStats: TeamSessionStat[];
-		detectData: { running: boolean } | null;
+		memberTag: string | undefined;
 		onrefresh: () => void;
 	}
 
-	let { members, teamName, devices, userId, sessionStats, detectData, onrefresh }: Props =
-		$props();
+	let { members, teamName, memberTag, onrefresh }: Props = $props();
 
 	let confirmRemove = $state<string | null>(null);
 	let removing = $state(false);
 
-	function getDeviceInfo(member: SyncTeamMember): SyncDevice | undefined {
-		return devices.find((d) => d.device_id === member.device_id);
-	}
-
-	function isConnected(member: SyncTeamMember): boolean {
-		return getDeviceInfo(member)?.connected ?? member.connected ?? false;
+	function memberDisplayName(member: SyncTeamMember): string {
+		return member.user_id || member.member_tag;
 	}
 
 	function isSelf(member: SyncTeamMember): boolean {
-		return member.name === userId;
+		return member.member_tag === memberTag;
 	}
 
-	// Build 14-day sparkline data for a member
-	function buildSparklineData(memberName: string): number[] {
-		const today = new Date();
-		const days: number[] = new Array(14).fill(0);
-
-		for (const stat of sessionStats) {
-			if (stat.member_name !== memberName) continue;
-			const statDate = new Date(stat.date);
-			const diffMs = today.getTime() - statDate.getTime();
-			const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-			if (diffDays >= 0 && diffDays < 14) {
-				days[13 - diffDays] += stat.packaged + stat.received;
-			}
+	function statusColor(status: string): string {
+		switch (status) {
+			case 'active':
+				return 'bg-[var(--success)]/10 text-[var(--success)] border-[var(--success)]/20';
+			case 'added':
+				return 'bg-[var(--warning)]/10 text-[var(--warning)] border-[var(--warning)]/20';
+			case 'removed':
+				return 'bg-[var(--error)]/10 text-[var(--error)] border-[var(--error)]/20';
+			default:
+				return 'bg-[var(--bg-muted)] text-[var(--text-muted)] border-[var(--border)]';
 		}
-
-		return days;
 	}
 
-	function getMemberSessionTotals(memberName: string): { sent: number; received: number } {
-		let sent = 0;
-		let received = 0;
-		for (const stat of sessionStats) {
-			if (stat.member_name !== memberName) continue;
-			sent += stat.packaged;
-			received += stat.received;
-		}
-		return { sent, received };
-	}
-
-	async function handleRemove(memberName: string) {
+	async function handleRemove(tag: string) {
 		if (removing) return;
 		removing = true;
 
 		try {
 			const res = await fetch(
-				`${API_BASE}/sync/teams/${encodeURIComponent(teamName)}/members/${encodeURIComponent(memberName)}`,
+				`${API_BASE}/sync/teams/${encodeURIComponent(teamName)}/members/${encodeURIComponent(tag)}`,
 				{ method: 'DELETE' }
 			);
 
@@ -91,34 +66,28 @@
 		</p>
 	{:else}
 		<div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-			{#each members as member (member.device_id || member.name)}
-				{@const colors = getTeamMemberColor(member.name)}
-				{@const hexColor = getTeamMemberHexColor(member.name)}
-				{@const device = getDeviceInfo(member)}
-				{@const connected = device?.connected ?? member.connected ?? false}
+			{#each members as member (member.member_tag)}
+				{@const displayName = memberDisplayName(member)}
+				{@const colors = getTeamMemberColor(displayName)}
+				{@const hexColor = getTeamMemberHexColor(displayName)}
 				{@const self = isSelf(member)}
-				{@const inBytes = device?.in_bytes_total ?? member.in_bytes_total ?? 0}
-				{@const outBytes = device?.out_bytes_total ?? member.out_bytes_total ?? 0}
-				{@const sparkline = buildSparklineData(member.name)}
-				{@const totals = getMemberSessionTotals(member.name)}
-				<a
-					href="/members/{encodeURIComponent(member.device_id)}"
-					class="relative flex flex-col gap-3 p-4 rounded-lg border border-[var(--border)] bg-[var(--bg-base)] hover:border-[var(--accent)]/30 hover:shadow-sm transition-all"
+				<div
+					class="relative flex flex-col gap-3 p-4 rounded-lg border border-[var(--border)] bg-[var(--bg-base)]"
 				>
-					<!-- Top row: avatar + name + connection status -->
+					<!-- Top row: avatar + name + status -->
 					<div class="flex items-center gap-3">
 						<!-- Avatar -->
 						<div
 							class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold shrink-0"
 							style="background: {hexColor}; color: white; box-shadow: 0 0 0 2px {hexColor}33;"
 						>
-							{member.name.charAt(0).toUpperCase()}
+							{displayName.charAt(0).toUpperCase()}
 						</div>
 
 						<div class="flex-1 min-w-0">
 							<div class="flex items-center gap-2">
 								<span class="text-sm font-medium text-[var(--text-primary)] truncate">
-									{member.name}
+									{member.user_id}
 								</span>
 								{#if self}
 									<span
@@ -127,39 +96,25 @@
 										You
 									</span>
 								{/if}
+								<span
+									class="shrink-0 px-1.5 py-0.5 text-[10px] font-medium rounded-full border {statusColor(member.status)}"
+								>
+									{member.status}
+								</span>
 							</div>
-							<span
-								class="flex items-center gap-1 text-[11px] mt-0.5 {connected || self
-									? 'text-[var(--success)]'
-									: 'text-[var(--text-muted)]'}"
-							>
-								{#if connected || self}
-									<Wifi size={11} />
-									Online
-								{:else}
-									<WifiOff size={11} />
-									Offline
-								{/if}
-							</span>
+							<div class="flex items-center gap-2 mt-0.5">
+								<span class="text-[11px] text-[var(--text-muted)] font-mono truncate">
+									{member.machine_tag}
+								</span>
+							</div>
 						</div>
 
-						<!-- Settings + Remove buttons (top-right) -->
+						<!-- Remove button -->
 						{#if !self}
-							<button
-								onclick={(e) => { e.preventDefault(); e.stopPropagation(); window.location.href = `/members/${encodeURIComponent(member.device_id)}?tab=settings`; }}
-								class="p-1 rounded text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--accent)]/10 transition-colors shrink-0"
-								title="Member settings"
-								aria-label="Settings for {member.name}"
-							>
-								<Settings size={13} />
-							</button>
-						{/if}
-
-						{#if !self}
-							{#if confirmRemove === member.name}
+							{#if confirmRemove === member.member_tag}
 								<div class="flex items-center gap-1 shrink-0">
 									<button
-										onclick={(e) => { e.preventDefault(); e.stopPropagation(); handleRemove(member.name); }}
+										onclick={() => handleRemove(member.member_tag)}
 										disabled={removing}
 										class="px-2 py-1 text-xs font-medium rounded bg-[var(--error)] text-white hover:bg-[var(--error)]/80 transition-colors disabled:opacity-50"
 									>
@@ -170,7 +125,7 @@
 										{/if}
 									</button>
 									<button
-										onclick={(e) => { e.preventDefault(); e.stopPropagation(); confirmRemove = null; }}
+										onclick={() => (confirmRemove = null)}
 										class="px-2 py-1 text-xs rounded text-[var(--text-muted)] hover:bg-[var(--bg-muted)] transition-colors"
 									>
 										Cancel
@@ -178,10 +133,10 @@
 								</div>
 							{:else}
 								<button
-									onclick={(e) => { e.preventDefault(); e.stopPropagation(); confirmRemove = member.name; }}
+									onclick={() => (confirmRemove = member.member_tag)}
 									class="p-1 rounded text-[var(--text-muted)] hover:text-[var(--error)] hover:bg-[var(--error)]/10 transition-colors shrink-0"
 									title="Remove member"
-									aria-label="Remove member {member.name}"
+									aria-label="Remove member {displayName}"
 								>
 									<Trash2 size={13} />
 								</button>
@@ -189,28 +144,13 @@
 						{/if}
 					</div>
 
-					<!-- Stats row: sessions + transfer + sparkline -->
-					<div class="flex items-center justify-between gap-3 pt-2 border-t border-[var(--border)]/50">
-						<div class="flex items-center gap-4 text-[11px] text-[var(--text-muted)]">
-							{#if totals.sent > 0 || totals.received > 0}
-								<span class="flex items-center gap-1" title="Sessions shared">
-									<ArrowUpDown size={11} />
-									{totals.sent + totals.received} sessions
-								</span>
-							{/if}
-							{#if inBytes > 0 || outBytes > 0}
-								<span title="Data received">&darr; {formatBytes(inBytes)}</span>
-								<span title="Data sent">&uarr; {formatBytes(outBytes)}</span>
-							{:else if totals.sent === 0 && totals.received === 0}
-								<span>No activity yet</span>
-							{/if}
-						</div>
-
-						{#if sparkline.some((v) => v > 0)}
-							<MemberSparkline data={sparkline} color={hexColor} />
-						{/if}
+					<!-- Detail row -->
+					<div class="flex items-center gap-3 pt-2 border-t border-[var(--border)]/50 text-[11px] text-[var(--text-muted)]">
+						<span class="font-mono truncate" title="Member tag">{member.member_tag}</span>
+						<span class="text-[var(--border)]">&middot;</span>
+						<span class="font-mono truncate" title="Device ID">{member.device_id.slice(0, 7)}&hellip;</span>
 					</div>
-				</a>
+				</div>
 			{/each}
 		</div>
 	{/if}
@@ -241,23 +181,6 @@
 					Discovery via relay can take 15-60 seconds after joining
 				</li>
 			</ul>
-			<div class="mt-3 flex items-center gap-2 text-xs">
-				{#if detectData?.running}
-					<span class="flex items-center gap-1 text-[var(--success)]">
-						<span class="w-1.5 h-1.5 rounded-full bg-[var(--success)]"></span>
-						Your Syncthing is running
-					</span>
-				{:else}
-					<span class="flex items-center gap-1 text-[var(--error)]">
-						<span class="w-1.5 h-1.5 rounded-full bg-[var(--error)]"></span>
-						Your Syncthing is not running
-					</span>
-					<span class="text-[var(--text-muted)]">&mdash; start with</span>
-					<code class="px-1 py-0.5 rounded bg-[var(--bg-muted)] text-[10px] font-mono"
-						>brew services start syncthing</code
-					>
-				{/if}
-			</div>
 		</div>
 	{/if}
 </div>

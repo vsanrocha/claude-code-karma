@@ -249,3 +249,241 @@ class TestListMembers:
         members = resp.json()["members"]
         assert len(members) == 1
         assert members[0]["member_tag"] == "c.mac"
+
+
+class TestJoinCode:
+    def test_returns_code(self, client, conn, mock_config, mock_pairing_svc):
+        from repositories.team_repo import TeamRepository
+
+        TeamRepository().save(
+            conn,
+            Team(name="delta", leader_device_id="D4", leader_member_tag="d.mac"),
+        )
+        mock_pairing_svc.generate_code.return_value = "WXYZ-5678"
+        resp = client.get("/sync/teams/delta/join-code")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["code"] == "WXYZ-5678"
+        assert data["member_tag"] == "jayant.macbook"
+        assert data["device_id"] == "DEV-SELF"
+        mock_pairing_svc.generate_code.assert_called_once_with(
+            "jayant.macbook", "DEV-SELF"
+        )
+
+    def test_team_not_found_returns_404(self, client):
+        resp = client.get("/sync/teams/nonexistent/join-code")
+        assert resp.status_code == 404
+
+    def test_no_device_id_returns_400(self, client, conn, mock_config):
+        from repositories.team_repo import TeamRepository
+
+        TeamRepository().save(
+            conn,
+            Team(name="epsilon", leader_device_id="D5", leader_member_tag="e.mac"),
+        )
+        mock_config.syncthing.device_id = ""
+        resp = client.get("/sync/teams/epsilon/join-code")
+        assert resp.status_code == 400
+
+
+class TestTeamActivity:
+    def test_returns_events(self, client, conn):
+        from repositories.team_repo import TeamRepository
+        from repositories.event_repo import EventRepository
+        from domain.events import SyncEvent, SyncEventType
+
+        TeamRepository().save(
+            conn,
+            Team(name="zeta", leader_device_id="D6", leader_member_tag="f.mac"),
+        )
+        EventRepository().log(
+            conn,
+            SyncEvent(
+                event_type=SyncEventType.team_created,
+                team_name="zeta",
+                member_tag="f.mac",
+            ),
+        )
+        resp = client.get("/sync/teams/zeta/activity")
+        assert resp.status_code == 200
+        events = resp.json()["events"]
+        assert len(events) == 1
+        assert events[0]["event_type"] == "team_created"
+        assert events[0]["team_name"] == "zeta"
+
+    def test_team_not_found_returns_404(self, client):
+        resp = client.get("/sync/teams/nonexistent/activity")
+        assert resp.status_code == 404
+
+    def test_limit_param(self, client, conn):
+        from repositories.team_repo import TeamRepository
+        from repositories.event_repo import EventRepository
+        from domain.events import SyncEvent, SyncEventType
+
+        TeamRepository().save(
+            conn,
+            Team(name="eta", leader_device_id="D7", leader_member_tag="g.mac"),
+        )
+        for _ in range(5):
+            EventRepository().log(
+                conn,
+                SyncEvent(
+                    event_type=SyncEventType.member_added,
+                    team_name="eta",
+                    member_tag="g.mac",
+                ),
+            )
+        resp = client.get("/sync/teams/eta/activity?limit=2")
+        assert resp.status_code == 200
+        assert len(resp.json()["events"]) == 2
+
+    def test_empty_activity(self, client, conn):
+        from repositories.team_repo import TeamRepository
+
+        TeamRepository().save(
+            conn,
+            Team(name="theta", leader_device_id="D8", leader_member_tag="h.mac"),
+        )
+        resp = client.get("/sync/teams/theta/activity")
+        assert resp.status_code == 200
+        assert resp.json()["events"] == []
+
+
+class TestProjectStatus:
+    def test_returns_project_subscription_counts(self, client, conn):
+        from repositories.team_repo import TeamRepository
+        from repositories.member_repo import MemberRepository
+        from repositories.project_repo import ProjectRepository
+        from repositories.subscription_repo import SubscriptionRepository
+        from domain.project import SharedProject
+        from domain.subscription import Subscription, SubscriptionStatus, SyncDirection
+
+        TeamRepository().save(
+            conn,
+            Team(name="iota", leader_device_id="D9", leader_member_tag="i.mac"),
+        )
+        MemberRepository().save(
+            conn,
+            Member(
+                member_tag="i.mac", team_name="iota", device_id="D9",
+                user_id="i", machine_tag="mac",
+            ),
+        )
+        MemberRepository().save(
+            conn,
+            Member(
+                member_tag="j.laptop", team_name="iota", device_id="D10",
+                user_id="j", machine_tag="laptop",
+            ),
+        )
+        ProjectRepository().save(
+            conn,
+            SharedProject(
+                team_name="iota", git_identity="user/repo",
+                folder_suffix="user-repo",
+            ),
+        )
+        SubscriptionRepository().save(
+            conn,
+            Subscription(
+                member_tag="i.mac", team_name="iota",
+                project_git_identity="user/repo",
+                status=SubscriptionStatus.ACCEPTED,
+            ),
+        )
+        SubscriptionRepository().save(
+            conn,
+            Subscription(
+                member_tag="j.laptop", team_name="iota",
+                project_git_identity="user/repo",
+                status=SubscriptionStatus.OFFERED,
+            ),
+        )
+        resp = client.get("/sync/teams/iota/project-status")
+        assert resp.status_code == 200
+        projects = resp.json()["projects"]
+        assert len(projects) == 1
+        p = projects[0]
+        assert p["git_identity"] == "user/repo"
+        assert p["subscription_counts"]["accepted"] == 1
+        assert p["subscription_counts"]["offered"] == 1
+        assert p["subscription_counts"]["paused"] == 0
+        assert p["subscription_counts"]["declined"] == 0
+
+    def test_team_not_found_returns_404(self, client):
+        resp = client.get("/sync/teams/nonexistent/project-status")
+        assert resp.status_code == 404
+
+    def test_no_projects(self, client, conn):
+        from repositories.team_repo import TeamRepository
+
+        TeamRepository().save(
+            conn,
+            Team(name="kappa", leader_device_id="D11", leader_member_tag="k.mac"),
+        )
+        resp = client.get("/sync/teams/kappa/project-status")
+        assert resp.status_code == 200
+        assert resp.json()["projects"] == []
+
+
+class TestSessionStats:
+    def test_returns_member_stats(self, client, conn):
+        from repositories.team_repo import TeamRepository
+        from repositories.member_repo import MemberRepository
+        from repositories.subscription_repo import SubscriptionRepository
+        from domain.subscription import Subscription, SubscriptionStatus
+
+        TeamRepository().save(
+            conn,
+            Team(name="lambda", leader_device_id="D12", leader_member_tag="l.mac"),
+        )
+        MemberRepository().save(
+            conn,
+            Member(
+                member_tag="l.mac", team_name="lambda", device_id="D12",
+                user_id="l", machine_tag="mac", status=MemberStatus.ACTIVE,
+            ),
+        )
+        # Need a project for the FK constraint
+        from repositories.project_repo import ProjectRepository
+        from domain.project import SharedProject
+
+        ProjectRepository().save(
+            conn,
+            SharedProject(
+                team_name="lambda", git_identity="org/proj",
+                folder_suffix="org-proj",
+            ),
+        )
+        SubscriptionRepository().save(
+            conn,
+            Subscription(
+                member_tag="l.mac", team_name="lambda",
+                project_git_identity="org/proj",
+                status=SubscriptionStatus.ACCEPTED,
+            ),
+        )
+        resp = client.get("/sync/teams/lambda/session-stats")
+        assert resp.status_code == 200
+        members = resp.json()["members"]
+        assert len(members) == 1
+        m = members[0]
+        assert m["member_tag"] == "l.mac"
+        assert m["user_id"] == "l"
+        assert m["status"] == "active"
+        assert m["subscription_count"] == 1
+
+    def test_team_not_found_returns_404(self, client):
+        resp = client.get("/sync/teams/nonexistent/session-stats")
+        assert resp.status_code == 404
+
+    def test_no_members(self, client, conn):
+        from repositories.team_repo import TeamRepository
+
+        TeamRepository().save(
+            conn,
+            Team(name="mu", leader_device_id="D13", leader_member_tag="m.mac"),
+        )
+        resp = client.get("/sync/teams/mu/session-stats")
+        assert resp.status_code == 200
+        assert resp.json()["members"] == []

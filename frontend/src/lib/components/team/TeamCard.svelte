@@ -9,16 +9,19 @@
 	let projects = $derived(team.projects ?? []);
 	let memberCount = $derived(members.length || team.member_count || 0);
 	let projectCount = $derived(projects.length || team.project_count || 0);
-	let onlineCount = $derived(members.filter((m) => m.connected).length);
+	let activeCount = $derived(members.filter((m) => m.status === 'active').length);
+
+	function memberDisplayName(member: { member_tag: string; user_id?: string }): string {
+		return member.user_id || member.member_tag;
+	}
 
 	function initials(name: string): string {
 		return name
-			.split(/[-_\s]+/)
+			.split(/[-_.\s]+/)
 			.slice(0, 2)
 			.map((w) => w[0]?.toUpperCase() ?? '')
 			.join('');
 	}
-
 </script>
 
 <a
@@ -29,7 +32,7 @@
 	style="transition-duration: var(--duration-fast);"
 	aria-label="Team {team.name}, {memberCount} {memberCount === 1 ? 'member' : 'members'}, {projectCount} {projectCount === 1 ? 'project' : 'projects'}"
 >
-	<!-- Team name + online indicator -->
+	<!-- Team name + status indicator -->
 	<div class="flex-1 min-w-0">
 		<div class="flex items-center gap-2.5">
 			<h3
@@ -37,11 +40,17 @@
 			>
 				{team.name}
 			</h3>
-			{#if onlineCount > 0}
+			<span class="px-2 py-0.5 text-[10px] font-medium rounded-full
+				{team.status === 'active'
+					? 'bg-[var(--success)]/10 text-[var(--success)] border border-[var(--success)]/20'
+					: 'bg-[var(--error)]/10 text-[var(--error)] border border-[var(--error)]/20'}">
+				{team.status}
+			</span>
+			{#if activeCount > 0}
 				<span class="flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-full
 					bg-[var(--success)]/10 text-[var(--success)] border border-[var(--success)]/20 whitespace-nowrap">
 					<span class="w-1.5 h-1.5 rounded-full bg-[var(--success)] animate-pulse"></span>
-					{onlineCount} online
+					{activeCount} active
 				</span>
 			{/if}
 		</div>
@@ -60,15 +69,16 @@
 
 	<!-- Member avatars -->
 	<div class="flex items-center -space-x-2 shrink-0">
-		{#each members.slice(0, 5) as member (member.name)}
+		{#each members.slice(0, 5) as member (member.member_tag)}
+			{@const displayName = memberDisplayName(member)}
 			<div
 				class="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold text-white
 					border-2 border-[var(--bg-subtle)] transition-colors relative"
-				style="background-color: {getTeamMemberHexColor(member.name)};"
-				title="{member.name}{member.connected ? ' (online)' : ''}"
+				style="background-color: {getTeamMemberHexColor(displayName)};"
+				title="{displayName} ({member.status})"
 			>
-				{initials(member.name)}
-				{#if member.connected}
+				{initials(displayName)}
+				{#if member.status === 'active'}
 					<span class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-[var(--success)] border-2 border-[var(--bg-base)] group-hover:border-[var(--bg-subtle)]"></span>
 				{/if}
 			</div>

@@ -56,8 +56,8 @@
 							method: 'POST',
 							headers: { 'Content-Type': 'application/json' },
 							body: JSON.stringify({
-								name: encodedName,
-								path: project?.path ?? ''
+								git_identity: encodedName,
+								encoded_name: encodedName
 							})
 						}
 					);

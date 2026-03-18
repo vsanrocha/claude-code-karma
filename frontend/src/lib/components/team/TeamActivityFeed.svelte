@@ -38,10 +38,14 @@
 		{ value: 'settings_changed', label: 'Settings' }
 	];
 
+	function memberDisplayName(member: SyncTeamMember): string {
+		return member.user_id || member.member_tag;
+	}
+
 	function buildParams(): URLSearchParams {
 		const params = new URLSearchParams({ limit: '20' });
 		if (filterType) params.set('event_type', filterType);
-		if (filterMember) params.set('member_name', filterMember);
+		if (filterMember) params.set('member_tag', filterMember);
 		return params;
 	}
 
@@ -76,8 +80,8 @@
 		fetchEvents();
 	}
 
-	function selectMemberFilter(member: string) {
-		filterMember = filterMember === member ? '' : member;
+	function selectMemberFilter(tag: string) {
+		filterMember = filterMember === tag ? '' : tag;
 		fetchEvents();
 	}
 
@@ -111,21 +115,22 @@
 	{#if members.length > 0}
 		<div class="flex flex-wrap gap-1.5 px-4 pb-3">
 			{#each members as member}
-				{@const hex = getTeamMemberHexColor(member.name)}
-				{@const active = filterMember === member.name}
+				{@const displayName = memberDisplayName(member)}
+				{@const hex = getTeamMemberHexColor(displayName)}
+				{@const active = filterMember === member.member_tag}
 				<button
 					class="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full border transition-colors
 						{active
 							? 'opacity-100'
 							: 'opacity-60 border-[var(--border)] text-[var(--text-muted)] hover:opacity-80'}"
 					style={active ? `border-color: ${hex}; color: ${hex}; background-color: ${hex}11` : ''}
-					onclick={() => selectMemberFilter(member.name)}
+					onclick={() => selectMemberFilter(member.member_tag)}
 				>
 					<span
 						class="w-2 h-2 rounded-full shrink-0"
 						style="background-color: {hex}"
 					></span>
-					{member.name}
+					{displayName}
 				</button>
 			{/each}
 		</div>
@@ -137,7 +142,7 @@
 			<p class="py-8 text-center text-sm text-[var(--text-muted)]">No activity yet</p>
 		{:else}
 			<div class="divide-y divide-[var(--border)]/50">
-				{#each events as event (event.id)}
+				{#each events as event, i (event.created_at + '-' + i)}
 					<div
 						class="flex items-start gap-3 px-4 py-3 {isSyncEventWarning(event.event_type)
 							? 'bg-[var(--warning)]/5'
@@ -171,6 +176,11 @@
 								<span class="text-[11px] text-[var(--text-muted)]">
 									{formatRelativeTime(event.created_at)}
 								</span>
+								{#if event.member_tag}
+									<span class="text-[11px] text-[var(--text-muted)] font-mono">
+										{event.member_tag}
+									</span>
+								{/if}
 								{#if event.event_type && SYNC_EVENT_META[event.event_type]}
 									<span
 										class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full
