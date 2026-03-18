@@ -69,6 +69,18 @@ class ProjectService:
         )
         self.projects.save(conn, project)
 
+        # Create ACCEPTED subscription for the leader (direction=BOTH) so they
+        # participate in Phase 3 device lists and get inbox folders for members.
+        from domain.subscription import SubscriptionStatus
+        leader_sub = Subscription(
+            member_tag=team.leader_member_tag,
+            team_name=team_name,
+            project_git_identity=git_identity,
+            status=SubscriptionStatus.ACCEPTED,
+            direction=SyncDirection.BOTH,
+        )
+        self.subs.save(conn, leader_sub)
+
         # Create OFFERED subscription for each active non-leader member
         for member in self.members.list_for_team(conn, team_name):
             if member.is_active and not team.is_leader(member.device_id):
