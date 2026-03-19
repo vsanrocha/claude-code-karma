@@ -71,7 +71,8 @@ class TestStatus:
         assert data["configured"] is True
         assert data["user_id"] == "jayant"
         assert data["member_tag"] == "jayant.macbook"
-        assert "karma" in data["teams"]
+        team_names = [t["name"] for t in data["teams"]]
+        assert "karma" in team_names
 
     def test_not_configured(self, conn):
         from routers.sync_system import router
