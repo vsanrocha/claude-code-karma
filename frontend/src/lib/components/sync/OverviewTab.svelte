@@ -107,8 +107,11 @@
 	async function syncAllNow() {
 		syncAllActing = true;
 		try {
-			// Trigger reconciliation which handles sync across all teams
-			await fetch(`${API_BASE}/sync/reconcile`, { method: 'POST' }).catch(() => null);
+			// Package sessions + reconcile devices in parallel
+			await Promise.all([
+				fetch(`${API_BASE}/sync/package`, { method: 'POST' }).catch(() => null),
+				fetch(`${API_BASE}/sync/reconcile`, { method: 'POST' }).catch(() => null),
+			]);
 			await loadProjectStatus();
 		} finally {
 			syncAllActing = false;
