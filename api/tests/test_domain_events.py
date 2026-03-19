@@ -25,8 +25,8 @@ class TestSyncEventType:
         for name in expected:
             assert name in actual_values, f"Missing event type: {name}"
 
-    def test_exactly_18_event_types(self):
-        assert len(SyncEventType) == 18
+    def test_exactly_19_event_types(self):
+        assert len(SyncEventType) == 19
 
     def test_event_type_is_str_enum(self):
         assert isinstance(SyncEventType.team_created, str)

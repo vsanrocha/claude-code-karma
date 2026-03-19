@@ -125,7 +125,7 @@ class TestPutConfigDevice:
         device = {"deviceID": "AAAA-BBBB", "name": "laptop", "addresses": ["dynamic"]}
         with patch.object(client, "_put", new=AsyncMock(return_value=None)) as mock_put:
             await client.put_config_device(device)
-        mock_put.assert_called_once_with("/rest/config/devices", json=device)
+        mock_put.assert_called_once_with("/rest/config/devices/AAAA-BBBB", json=device)
 
 
 class TestDeleteConfigDevice:
@@ -153,7 +153,7 @@ class TestPutConfigFolder:
         folder = {"id": "karma-out--user.host--abc", "type": "sendonly"}
         with patch.object(client, "_put", new=AsyncMock(return_value=None)) as mock_put:
             await client.put_config_folder(folder)
-        mock_put.assert_called_once_with("/rest/config/folders", json=folder)
+        mock_put.assert_called_once_with("/rest/config/folders/karma-out--user.host--abc", json=folder)
 
 
 class TestDeleteConfigFolder:

@@ -47,8 +47,13 @@ CREATE TABLE IF NOT EXISTS sessions (
     jsonl_size INTEGER DEFAULT 0,
     session_source TEXT,
     source_encoded_name TEXT,
+    source TEXT DEFAULT 'local',
+    remote_user_id TEXT,
+    remote_machine_id TEXT,
     indexed_at TEXT DEFAULT (datetime('now'))
 );
+
+CREATE INDEX IF NOT EXISTS idx_sessions_source ON sessions(source);
 
 CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_encoded_name);
 CREATE INDEX IF NOT EXISTS idx_sessions_start ON sessions(start_time DESC);
@@ -134,6 +139,7 @@ CREATE TABLE IF NOT EXISTS subagent_invocations (
     session_uuid TEXT NOT NULL,
     agent_id TEXT NOT NULL,
     subagent_type TEXT,
+    agent_display_name TEXT,
     input_tokens INTEGER DEFAULT 0,
     output_tokens INTEGER DEFAULT 0,
     cost_usd REAL DEFAULT 0,
