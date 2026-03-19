@@ -110,6 +110,54 @@ async def sync_init(req: InitRequest):
     }
 
 
+@router.post("/package")
+async def trigger_package(
+    team_name: Optional[str] = None,
+    git_identity: Optional[str] = None,
+    conn: sqlite3.Connection = Depends(get_conn),
+    config=Depends(require_config),
+):
+    """Trigger on-demand session packaging.
+
+    Scope:
+    - No params: all projects across all teams
+    - team_name: all projects in that team
+    - team_name + git_identity: single project
+    """
+    from services.sync.packaging_service import PackagingService
+
+    svc = PackagingService(
+        member_tag=config.member_tag,
+        user_id=config.user_id,
+        machine_id=config.machine_id,
+        device_id=config.syncthing.device_id if config.syncthing else "",
+    )
+
+    projects = svc.resolve_packagable_projects(
+        conn, team_name=team_name, git_identity=git_identity,
+    )
+
+    results = []
+    for proj in projects:
+        result = svc.package_project(
+            conn,
+            team_name=proj["team_name"],
+            git_identity=proj["git_identity"],
+            encoded_name=proj["encoded_name"],
+            folder_suffix=proj["folder_suffix"],
+        )
+        entry = {
+            "team_name": result.team_name,
+            "git_identity": result.git_identity,
+            "sessions_packaged": result.sessions_packaged,
+        }
+        if result.error:
+            entry["error"] = result.error
+        results.append(entry)
+
+    return {"ok": True, "packaged": results}
+
+
 @router.post("/reconcile")
 async def trigger_reconciliation(
     conn: sqlite3.Connection = Depends(get_conn),
