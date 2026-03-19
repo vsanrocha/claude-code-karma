@@ -12,9 +12,11 @@
 		ArrowUp,
 		ArrowDown,
 		Check,
-		Inbox
+		Inbox,
+		RefreshCw,
+		CheckCircle2
 	} from 'lucide-svelte';
-	import type { SyncTeamProject, SyncSubscription } from '$lib/api-types';
+	import type { SyncTeamProject, SyncSubscription, SyncProjectStatus } from '$lib/api-types';
 	import AddProjectDialog from './AddProjectDialog.svelte';
 
 	interface Props {
@@ -191,6 +193,67 @@
 		const idx = order.indexOf(current);
 		return order[(idx + 1) % order.length];
 	}
+
+	// ── Sync status state ──
+	let projectStatuses = $state<SyncProjectStatus[]>([]);
+	let syncingProject = $state<string | null>(null);
+	let syncingAll = $state(false);
+
+	async function loadProjectStatus() {
+		try {
+			const res = await fetch(
+				`${API_BASE}/sync/teams/${encodeURIComponent(teamName)}/project-status`
+			).catch(() => null);
+			if (res?.ok) {
+				const data = await res.json();
+				projectStatuses = data.projects ?? [];
+			}
+		} catch {
+			// non-critical
+		}
+	}
+
+	let statusByGit = $derived.by(() => {
+		const map = new Map<string, SyncProjectStatus>();
+		for (const ps of projectStatuses) {
+			map.set(ps.git_identity, ps);
+		}
+		return map;
+	});
+
+	let totalTeamGap = $derived(
+		projectStatuses.reduce((sum, p) => sum + (p.gap ?? 0), 0)
+	);
+
+	async function syncProject(gitIdentity: string) {
+		syncingProject = gitIdentity;
+		try {
+			await fetch(
+				`${API_BASE}/sync/package?team_name=${encodeURIComponent(teamName)}&git_identity=${encodeURIComponent(gitIdentity)}`,
+				{ method: 'POST' }
+			);
+			await loadProjectStatus();
+		} finally {
+			syncingProject = null;
+		}
+	}
+
+	async function syncAllTeam() {
+		syncingAll = true;
+		try {
+			await fetch(
+				`${API_BASE}/sync/package?team_name=${encodeURIComponent(teamName)}`,
+				{ method: 'POST' }
+			);
+			await loadProjectStatus();
+		} finally {
+			syncingAll = false;
+		}
+	}
+
+	$effect(() => {
+		loadProjectStatus();
+	});
 </script>
 
 <div class="space-y-6">
@@ -323,12 +386,36 @@
 		<p class="text-xs text-[var(--error)]" aria-live="polite">{removeProjectError}</p>
 	{/if}
 
+	<!-- Active Projects header -->
+	<div class="flex items-center justify-between px-5 py-3.5 border-b border-[var(--border-subtle)]">
+		<div class="flex items-center gap-2">
+			<h3 class="text-sm font-semibold text-[var(--text-primary)]">Active Projects</h3>
+		</div>
+		{#if totalTeamGap > 0}
+			<button
+				onclick={syncAllTeam}
+				disabled={syncingAll}
+				class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-[var(--radius)] bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-50"
+			>
+				{#if syncingAll}
+					<Loader2 size={12} class="animate-spin" />
+					Syncing...
+				{:else}
+					<RefreshCw size={12} />
+					Sync All ({totalTeamGap})
+				{/if}
+			</button>
+		{/if}
+	</div>
+
 	<div class="space-y-2">
 		{#each activeProjects as project (project.git_identity)}
 			{@const info = getProjectInfo(project)}
 			{@const mySub = getMySubscription(project.git_identity)}
 			{@const isActing = subscriptionActing === project.git_identity}
 			{@const isDirActing = directionActing === project.git_identity}
+			{@const ps = statusByGit.get(project.git_identity)}
+			{@const hasSendSub = mySub?.status === 'accepted' && (mySub?.direction === 'send' || mySub?.direction === 'both')}
 
 			<div class="p-4 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--bg-base)]">
 				<!-- Project header -->
@@ -362,6 +449,32 @@
 								: 'bg-[var(--error)]/8 text-[var(--error)] border-[var(--error)]/15'}">
 							{project.status}
 						</span>
+
+						<!-- Sync badge + button -->
+						{#if ps && hasSendSub}
+							{#if (ps.gap ?? 0) === 0}
+								<span class="shrink-0 flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-full bg-[var(--success)]/10 text-[var(--success)] border border-[var(--success)]/20">
+									<CheckCircle2 size={11} />
+									In Sync
+								</span>
+							{:else}
+								<span class="shrink-0 flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-full bg-[var(--warning)]/10 text-[var(--warning)] border border-[var(--warning)]/20">
+									{ps.gap} ready to sync
+								</span>
+								<button
+									onclick={() => syncProject(project.git_identity)}
+									disabled={syncingProject === project.git_identity}
+									class="shrink-0 p-1.5 rounded-[var(--radius)] text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--accent)]/10 transition-colors disabled:opacity-50"
+									aria-label="Sync project"
+								>
+									{#if syncingProject === project.git_identity}
+										<Loader2 size={14} class="animate-spin" />
+									{:else}
+										<RefreshCw size={14} />
+									{/if}
+								</button>
+							{/if}
+						{/if}
 
 						<!-- Remove button (leader only) -->
 						{#if isLeader && removeProjectConfirm === project.git_identity}
