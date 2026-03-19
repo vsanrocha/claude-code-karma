@@ -667,41 +667,45 @@ def index_remote_sessions(conn: sqlite3.Connection) -> dict:
         if not sessions_dir.exists():
             continue
 
-        # Resolve local project encoded_name via git identity matching.
-        # The inbox_suffix is derived from git_identity (e.g.
-        # "https:--github.com-User-repo" from "https://github.com/User/repo.git").
-        # We match it against the local projects table's git_identity.
+        # Resolve local project encoded_name via git_identity.
+        # Step 1: Look up the real git_identity from sync_projects using folder_suffix
+        # Step 2: Match that git_identity against local projects table
         local_encoded = inbox_suffix  # fallback
         try:
-            # Reverse derive: replace "-" back to "/" to approximate the git URL
-            approx_url = inbox_suffix.replace("-", "/")
-            local_rows = conn.execute(
-                "SELECT encoded_name, git_identity FROM projects WHERE git_identity IS NOT NULL"
-            ).fetchall()
-            for (enc, local_git) in local_rows:
-                lg = (local_git or "").rstrip("/").lower()
-                if lg.endswith(".git"):
-                    lg = lg[:-4]
-                au = approx_url.lower()
-                if lg and (lg in au or au.endswith(lg)):
-                    local_encoded = enc
-                    break
+            # Get git_identity from sync_projects (the source of truth)
+            sp_row = conn.execute(
+                "SELECT git_identity FROM sync_projects "
+                "WHERE folder_suffix = ? AND status = 'shared' LIMIT 1",
+                (inbox_suffix,),
+            ).fetchone()
+            if sp_row and sp_row[0]:
+                sync_git_id = sp_row[0].rstrip("/").lower()
+                if sync_git_id.endswith(".git"):
+                    sync_git_id = sync_git_id[:-4]
+
+                # Match against local projects by git_identity
+                local_rows = conn.execute(
+                    "SELECT encoded_name, git_identity FROM projects "
+                    "WHERE git_identity IS NOT NULL"
+                ).fetchall()
+                for (enc, local_git) in local_rows:
+                    lg = (local_git or "").rstrip("/").lower()
+                    if lg.endswith(".git"):
+                        lg = lg[:-4]
+                    # Match: one contains the other (handles short vs full URLs)
+                    if lg and (lg in sync_git_id or sync_git_id in lg
+                               or lg.endswith(sync_git_id)
+                               or sync_git_id.endswith(lg)):
+                        local_encoded = enc
+                        break
         except Exception:
             pass
 
-        # Also try mapping from get_project_mapping()
+        # Fallback: try get_project_mapping()
         if local_encoded == inbox_suffix:
-            try:
-                row = conn.execute(
-                    "SELECT encoded_name FROM sync_projects WHERE folder_suffix = ? AND status = 'shared' LIMIT 1",
-                    (inbox_suffix,),
-                ).fetchone()
-                if row and row[0]:
-                    local_encoded = mapping.get(
-                        (inbox_member_tag, row[0]), row[0]
-                    )
-            except Exception:
-                pass
+            local_encoded = mapping.get(
+                (inbox_member_tag, inbox_suffix), inbox_suffix
+            )
 
         classification_overrides = _load_manifest_classifications(inbox_dir)
         titles_map = _load_remote_titles(inbox_member_tag, local_encoded)
