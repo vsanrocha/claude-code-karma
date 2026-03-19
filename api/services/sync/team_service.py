@@ -189,13 +189,13 @@ class TeamService:
         tags = [m.member_tag for m in all_members]
         await self.folders.remove_device_from_team_folders(suffixes, tags, removed.device_id)
 
-        # Unpair only if device not in any other active team
+        # Unpair only if device not in any other team (ADDED or ACTIVE)
         other_memberships = self.members.get_by_device(conn, removed.device_id)
-        active_others = [
+        alive_others = [
             m for m in other_memberships
-            if m.team_name != team_name and m.is_active
+            if m.team_name != team_name and m.status != MemberStatus.REMOVED
         ]
-        if not active_others:
+        if not alive_others:
             await self.devices.unpair(removed.device_id)
 
         self.events.log(conn, SyncEvent(
