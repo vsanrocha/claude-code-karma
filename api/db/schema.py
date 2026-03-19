@@ -512,13 +512,14 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             logger.info(
                 "Migrating → v19: sync v4 — drop all old sync tables, recreate with clean-slate schema"
             )
-            # Drop all v3 sync tables (order matters for FK constraints)
+            # Drop all sync tables — both v3 names and v4 names (order matters for FKs)
             conn.execute("DROP TABLE IF EXISTS sync_subscriptions")
             conn.execute("DROP TABLE IF EXISTS sync_rejected_folders")
             conn.execute("DROP TABLE IF EXISTS sync_settings")
             conn.execute("DROP TABLE IF EXISTS sync_removed_members")
             conn.execute("DROP TABLE IF EXISTS sync_events")
             conn.execute("DROP TABLE IF EXISTS sync_team_projects")
+            conn.execute("DROP TABLE IF EXISTS sync_projects")
             conn.execute("DROP TABLE IF EXISTS sync_members")
             conn.execute("DROP TABLE IF EXISTS sync_teams")
 
