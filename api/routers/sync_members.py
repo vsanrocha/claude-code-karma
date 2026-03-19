@@ -130,6 +130,22 @@ async def get_member_profile(
         raise HTTPException(400, "device_id must not be empty")
     repos = make_repos()
     memberships = repos["members"].get_by_device(conn, device_id)
+
+    # Fallback: if device_id not in DB (e.g. self with empty device_id),
+    # check if it matches config and look up by member_tag instead
+    if not memberships and config:
+        my_did = (
+            config.syncthing.device_id
+            if getattr(config, "syncthing", None)
+            else None
+        )
+        if device_id == my_did and config.member_tag:
+            teams = repos["teams"].list_all(conn)
+            for t in teams:
+                m = repos["members"].get(conn, t.name, config.member_tag)
+                if m:
+                    memberships.append(m)
+
     if not memberships:
         raise HTTPException(404, f"Member with device '{device_id}' not found")
 
@@ -207,12 +223,37 @@ async def get_member_profile(
     if sent_row:
         sent_count = sent_row[0]
 
+    # Fallback: if no packaged events logged yet, count outbox files on disk
+    if sent_count == 0 and is_you:
+        from config import settings as app_settings
+        from services.syncthing.folder_manager import build_outbox_folder_id
+        for m in memberships:
+            for p in repos["projects"].list_for_team(conn, m.team_name):
+                if p.status.value != "shared":
+                    continue
+                folder_id = build_outbox_folder_id(member_tag, p.folder_suffix)
+                sessions_dir = app_settings.karma_base / folder_id / "sessions"
+                if sessions_dir.is_dir():
+                    sent_count += sum(1 for _ in sessions_dir.glob("*.jsonl"))
+
     recv_row = conn.execute(
         "SELECT COUNT(*) FROM sync_events WHERE event_type = 'session_received' AND member_tag = ?",
         (member_tag,),
     ).fetchone()
     if recv_row:
         received_count = recv_row[0]
+
+    # Fallback: if no received events but we have remote sessions in DB
+    if received_count == 0 and not is_you:
+        if all_project_encoded:
+            placeholders = ",".join("?" * len(all_project_encoded))
+            recv_fallback = conn.execute(
+                f"SELECT COUNT(*) FROM sessions WHERE source = 'remote' "
+                f"AND remote_user_id = ? AND project_encoded_name IN ({placeholders})",
+                [member_tag] + list(all_project_encoded),
+            ).fetchone()
+            if recv_fallback:
+                received_count = recv_fallback[0]
 
     if all_project_encoded:
         placeholders = ",".join("?" * len(all_project_encoded))

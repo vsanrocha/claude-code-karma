@@ -406,6 +406,7 @@ class WatcherManager:
                                 event_repo.log(db, SyncEvent(
                                     event_type=SyncEventType.session_packaged,
                                     team_name=tn,
+                                    member_tag=mt,
                                     project_git_identity=en,
                                     session_uuid=session_uuid,
                                 ))
