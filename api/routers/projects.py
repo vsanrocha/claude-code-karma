@@ -690,21 +690,21 @@ def get_project(
                         # Fall through to filesystem scan below
                         raise _FallbackToFilesystem()
 
-                _enrich_chain_titles(session_summaries)
-                return ProjectDetail(
-                    path=project.path,
-                    encoded_name=project.encoded_name,
-                    slug=project.slug,
-                    display_name=_remote_display_name or project.display_name,
-                    session_count=total_count,
-                    agent_count=project.agent_count,
-                    exists=project.exists,
-                    is_git_repository=project.is_git_repository,
-                    git_root_path=project.git_root_path,
-                    is_nested_project=project.is_nested_project,
-                    sessions=session_summaries,
-                    remote_session_count=remote_session_count,
-                )
+            _enrich_chain_titles(session_summaries)
+            return ProjectDetail(
+                path=project.path,
+                encoded_name=project.encoded_name,
+                slug=project.slug,
+                display_name=_remote_display_name or project.display_name,
+                session_count=total_count,
+                agent_count=project.agent_count,
+                exists=project.exists,
+                is_git_repository=project.is_git_repository,
+                git_root_path=project.git_root_path,
+                is_nested_project=project.is_nested_project,
+                sessions=session_summaries,
+                remote_session_count=remote_session_count,
+            )
         except _FallbackToFilesystem:
             logger.info("SQLite/filesystem mismatch, falling back to filesystem scan")
         except Exception as e:
