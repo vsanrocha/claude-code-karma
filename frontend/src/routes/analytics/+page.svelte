@@ -286,6 +286,7 @@
 	}
 
 	// Chart
+	// svelte-ignore non_reactive_update: chartCanvas is only bound once during mount
 	let chartCanvas: HTMLCanvasElement;
 	let chartInstance = $state<any>(null);
 
