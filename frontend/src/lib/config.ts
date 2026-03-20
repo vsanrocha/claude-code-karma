@@ -2,13 +2,14 @@
  * Centralized configuration for Claude Code Karma frontend.
  *
  * API Base URL:
- * - Uses PUBLIC_API_URL environment variable if set
+ * - Uses PUBLIC_API_URL environment variable if set (process.env, read at runtime)
  * - Falls back to http://localhost:8000 for local development
  *
  * To configure in production:
- * - Set PUBLIC_API_URL in your .env file
- * - Or set it in your deployment environment
+ * - Set PUBLIC_API_URL in your deployment environment
+ * - Or set it in your .env file
  */
+import { env } from '$env/dynamic/public';
 
 /**
  * API base URL for all backend requests.
@@ -18,7 +19,7 @@
  * const response = await fetch(`${API_BASE}/projects`);
  * ```
  */
-export const API_BASE = import.meta.env.PUBLIC_API_URL || 'http://localhost:8000';
+export const API_BASE = env.PUBLIC_API_URL || 'http://localhost:8000';
 
 /**
  * API request timeout in milliseconds (default: 30 seconds)

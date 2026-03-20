@@ -13,14 +13,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 git clone https://github.com/JayantDevkar/claude-code-karma.git
 cd claude-code-karma
 
-# Start API (terminal 1)
-cd api
-pip install -e ".[dev]" && pip install -r requirements.txt
+# Start both servers (one terminal)
+python dev.py
+
+# Or manually (two terminals):
+# Terminal 1 — API
+cd api && pip install -e ".[dev]" && pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
 
-# Start frontend (terminal 2)
-cd frontend
-npm install && npm run dev
+# Terminal 2 — Frontend
+cd frontend && npm install && npm run dev
 ```
 
 Open http://localhost:5173 to view the dashboard.
