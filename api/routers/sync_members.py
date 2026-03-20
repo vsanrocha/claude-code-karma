@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -11,6 +13,8 @@ from routers.sync_deps import get_conn, get_optional_config, make_repos
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sync", tags=["sync-members"])
+
+DEVICE_ID_RE = re.compile(r"^[A-Z2-7]{7}(-[A-Z2-7]{7}){7}$")
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +94,7 @@ async def list_members(
                     "teams": [t.name],
                     "_added_at": m.added_at,
                     "_member_tag": tag,
+                    "_machine_tag": m.machine_tag,
                 }
 
     # Fetch connection status once
@@ -104,6 +109,8 @@ async def list_members(
         result.append({
             "name": entry["name"],
             "device_id": did or "",
+            "member_tag": tag,
+            "machine_tag": entry.get("_machine_tag", ""),
             "connected": connected,
             "is_you": is_you,
             "team_count": len(entry["teams"]),
@@ -116,41 +123,47 @@ async def list_members(
 
 
 # ---------------------------------------------------------------------------
-# GET /sync/members/{device_id} — full member profile
+# GET /sync/members/{identifier} — full member profile
 # ---------------------------------------------------------------------------
 
-@router.get("/members/{device_id}")
+@router.get("/members/{identifier}")
 async def get_member_profile(
-    device_id: str,
+    identifier: str,
     conn: sqlite3.Connection = Depends(get_conn),
     config=Depends(get_optional_config),
 ):
-    """Full member profile: teams, stats, session history, activity."""
-    if not device_id or not device_id.strip():
-        raise HTTPException(400, "device_id must not be empty")
+    """Full member profile. Accepts member_tag or device_id (auto-detected)."""
+    if not identifier or not identifier.strip():
+        raise HTTPException(400, "identifier must not be empty")
     repos = make_repos()
-    memberships = repos["members"].get_by_device(conn, device_id)
 
-    # Fallback: if device_id not in DB (e.g. self with empty device_id),
-    # check if it matches config and look up by member_tag instead
+    # Detect format: Syncthing device_id vs member_tag
+    if DEVICE_ID_RE.match(identifier):
+        memberships = repos["members"].get_by_device(conn, identifier)
+    else:
+        memberships = repos["members"].get_all_by_member_tag(conn, identifier)
+
+    # Fallback for self: config device_id or member_tag
     if not memberships and config:
         my_did = (
             config.syncthing.device_id
             if getattr(config, "syncthing", None)
             else None
         )
-        if device_id == my_did and config.member_tag:
-            teams = repos["teams"].list_all(conn)
-            for t in teams:
-                m = repos["members"].get(conn, t.name, config.member_tag)
-                if m:
-                    memberships.append(m)
+        if config.member_tag:
+            if identifier == my_did or identifier == config.member_tag:
+                teams = repos["teams"].list_all(conn)
+                for t in teams:
+                    m = repos["members"].get(conn, t.name, config.member_tag)
+                    if m:
+                        memberships.append(m)
 
     if not memberships:
-        raise HTTPException(404, f"Member with device '{device_id}' not found")
+        raise HTTPException(404, f"Member '{identifier}' not found")
 
     member_tag = memberships[0].member_tag
     user_id = memberships[0].user_id
+    device_id = memberships[0].device_id or ""
 
     # Syncthing connection info (single HTTP call)
     my_device_id = (
@@ -160,7 +173,7 @@ async def get_member_profile(
     )
     my_member_tag = config.member_tag if config else None
     connections = _get_connections(config)
-    conn_entry = connections.get(device_id, {})
+    conn_entry = connections.get(device_id, {}) if device_id else {}
     is_you = member_tag == my_member_tag if my_member_tag else False
     connected = is_you or bool(conn_entry.get("connected", False))
     in_bytes = conn_entry.get("inBytesTotal", 0)
@@ -313,6 +326,63 @@ async def get_member_profile(
         if d["received"] > 0
     ]
 
+    # --- New fields: sync health ---
+    from routers.sync_teams import _get_active_counts, _count_packaged
+
+    unsynced_count = None
+    last_packaged_at = None
+    project_sync = None
+    sync_direction_val = None
+
+    if is_you:
+        active_counts = _get_active_counts()
+        project_sync_list = []
+        total_gap = 0
+        for m_item in memberships:
+            team_projects = repos["projects"].list_for_team(conn, m_item.team_name)
+            for p in team_projects:
+                if p.status.value != "shared":
+                    continue
+                enc, display = _resolve_project(conn, p.git_identity)
+                local_count = 0
+                if enc:
+                    row = conn.execute(
+                        "SELECT COUNT(*) FROM sessions WHERE project_encoded_name = ? AND (source IS NULL OR source != 'remote')",
+                        (enc,),
+                    ).fetchone()
+                    local_count = row[0] if row else 0
+                packaged_count = _count_packaged(member_tag, p.folder_suffix)
+                active_count = active_counts.get(enc, 0) if enc else 0
+                gap = max(0, local_count - packaged_count - active_count)
+                total_gap += gap
+                project_sync_list.append({
+                    "team_name": m_item.team_name,
+                    "git_identity": p.git_identity,
+                    "encoded_name": enc,
+                    "name": display or p.git_identity,
+                    "local_count": local_count,
+                    "packaged_count": packaged_count,
+                    "active_count": active_count,
+                    "gap": gap,
+                })
+        unsynced_count = total_gap
+        project_sync = project_sync_list
+
+        lp_row = conn.execute(
+            "SELECT MAX(created_at) FROM sync_events WHERE event_type = 'session_packaged'"
+        ).fetchone()
+        last_packaged_at = lp_row[0] if lp_row and lp_row[0] else None
+
+    # sync_direction: aggregate from accepted subscriptions
+    subs = repos["subs"].list_for_member(conn, member_tag)
+    accepted_dirs = {s.direction.value for s in subs if s.status.value == "accepted"}
+    if len(accepted_dirs) == 0:
+        sync_direction_val = None
+    elif len(accepted_dirs) == 1:
+        sync_direction_val = next(iter(accepted_dirs))
+    else:
+        sync_direction_val = "mixed"
+
     # Activity feed
     events = repos["events"].query(conn, member_tag=member_tag, limit=50)
     activity = [_event_dict(e, idx=i) for i, e in enumerate(events)]
@@ -320,6 +390,8 @@ async def get_member_profile(
     return {
         "user_id": user_id,
         "device_id": device_id,
+        "member_tag": member_tag,
+        "machine_tag": memberships[0].machine_tag,
         "connected": connected,
         "is_you": is_you,
         "in_bytes_total": in_bytes,
@@ -329,6 +401,10 @@ async def get_member_profile(
         "session_stats": session_stats,
         "incoming_stats": incoming_stats,
         "activity": activity,
+        "unsynced_count": unsynced_count,
+        "last_packaged_at": last_packaged_at,
+        "sync_direction": sync_direction_val,
+        "project_sync": project_sync,
     }
 
 
