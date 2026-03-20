@@ -1938,13 +1938,30 @@ export interface MemberStats {
 	last_active: string | null;
 }
 
+export interface MemberProjectSync {
+	team_name: string;
+	git_identity: string;
+	encoded_name: string | null;
+	name: string;
+	local_count: number;
+	packaged_count: number;
+	active_count: number;
+	gap: number;
+}
+
 export interface MemberProfile {
 	user_id: string;
+	member_tag: string;
+	machine_tag: string;
 	device_id: string;
 	connected: boolean;
 	is_you: boolean;
 	in_bytes_total: number;
 	out_bytes_total: number;
+	unsynced_count: number | null;
+	last_packaged_at: string | null;
+	sync_direction: 'both' | 'send' | 'receive' | 'mixed' | null;
+	project_sync: MemberProjectSync[] | null;
 	teams: MemberTeam[];
 	stats: MemberStats;
 	session_stats: TeamSessionStat[];
