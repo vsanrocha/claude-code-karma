@@ -21,6 +21,8 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from utils import is_encoded_project_dir
+
 # Ensure api/ is on the import path (needed when called from background thread)
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -94,7 +96,7 @@ def sync_all_projects(conn: sqlite3.Connection) -> dict:
 
         # First pass: normal projects
         for encoded_dir in projects_dir.iterdir():
-            if not encoded_dir.is_dir() or not encoded_dir.name.startswith("-"):
+            if not encoded_dir.is_dir() or not is_encoded_project_dir(encoded_dir.name):
                 continue
             if is_worktree_project(encoded_dir.name):
                 worktree_dirs.append(encoded_dir)
@@ -1430,10 +1432,11 @@ def _detect_project_path(session, encoded_name: str) -> Optional[str]:
     # Fallback: Decode from encoded name (lossy for paths with hyphens).
     # Only use the decoded path if it actually exists on disk, to avoid
     # storing wrong paths (e.g. "claude-karma" → "claude/karma").
-    if encoded_name.startswith("-"):
-        decoded = "/" + encoded_name[1:].replace("-", "/")
-        if Path(decoded).is_dir():
-            return decoded
+    from models.project import Project
+
+    decoded = Project.decode_path(encoded_name)
+    if Path(decoded).is_dir():
+        return decoded
 
     # Don't store a bad path — let _update_project_summaries resolve it
     # from sibling sessions that have working directory data.
@@ -1542,11 +1545,11 @@ def _resolve_project_path(encoded_name: str, candidate_paths: list) -> str:
     """
     from pathlib import Path
 
+    from models.project import Project
+
     if not candidate_paths:
         # Last resort: decode from encoded name (lossy for hyphenated paths)
-        if encoded_name.startswith("-"):
-            return "/" + encoded_name[1:].replace("-", "/")
-        return encoded_name
+        return Project.decode_path(encoded_name)
 
     # Find all paths whose encoding matches the encoded_name
     # (multiple paths can match due to lossy encoding: / and - both become -)
@@ -1554,11 +1557,7 @@ def _resolve_project_path(encoded_name: str, candidate_paths: list) -> str:
     for path in candidate_paths:
         if not path:
             continue
-        if path.startswith("/"):
-            encoded = "-" + path[1:].replace("/", "-")
-        else:
-            encoded = path.replace("/", "-")
-        if encoded == encoded_name:
+        if Project.encode_path(path) == encoded_name:
             matches.append(path)
 
     if matches:

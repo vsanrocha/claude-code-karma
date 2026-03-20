@@ -13,12 +13,14 @@ Tests cover:
 """
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
 from models import Agent, Project, Session
+from utils import is_encoded_project_dir
 
 
 class TestProjectInstantiation:
@@ -85,24 +87,37 @@ class TestEncodePath:
         assert result == "-Users-test-myproject"
 
     def test_encode_path_without_leading_slash(self):
-        """Test encoding a path that doesn't start with slash (edge case)."""
-        # The implementation adds leading dash regardless
+        """Test encoding a relative path (no leading slash, no drive letter)."""
+        # Relative paths go through the else branch: colon+slash replaced with dash
+        # No leading dash since there's no leading /
         result = Project.encode_path("Users/test/myproject")
-        assert result == "-Users-test-myproject"
+        assert result == "Users-test-myproject"
 
 
-class TestEncodePathWindowsBackslashes:
+class TestEncodePathWindows:
     """Tests for Project.encode_path() with Windows paths."""
 
-    def test_encode_windows_path_with_backslashes(self):
-        """Test encoding Windows path with backslashes."""
+    def test_encode_windows_absolute_path(self):
+        """Test encoding a Windows absolute path (C:\\...)."""
+        # Windows: C:\Code\Tools -> normalize -> C:/Code/Tools
+        # Then replace : and / with - -> C--Code-Tools
+        result = Project.encode_path("C:\\Code\\Tools")
+        assert result == "C--Code-Tools"
+
+    def test_encode_windows_user_path(self):
+        """Test encoding a Windows user path."""
         result = Project.encode_path("C:\\Users\\test\\myproject")
-        assert result == "-C:-Users-test-myproject"
+        assert result == "C--Users-test-myproject"
 
     def test_encode_mixed_slashes(self):
         """Test encoding path with mixed forward and back slashes."""
         result = Project.encode_path("C:\\Users/test\\myproject")
-        assert result == "-C:-Users-test-myproject"
+        assert result == "C--Users-test-myproject"
+
+    def test_encode_windows_different_drive(self):
+        """Test encoding a path on D: drive."""
+        result = Project.encode_path("D:\\Projects\\myapp")
+        assert result == "D--Projects-myapp"
 
     def test_encode_windows_unc_path(self):
         """Test encoding Windows UNC path."""
@@ -149,33 +164,220 @@ class TestDecodePath:
         assert decoded == "/Users/my/project"
 
 
+class TestDecodePathWindows:
+    """Tests for Project.decode_path() with Windows-encoded names."""
+
+    def test_decode_windows_c_drive(self):
+        """Test decoding a Windows C: drive encoded path."""
+        result = Project.decode_path("C--Code-Tools")
+        assert result == "C:/Code/Tools"
+
+    def test_decode_windows_d_drive(self):
+        """Test decoding a Windows D: drive encoded path."""
+        result = Project.decode_path("D--Projects-myapp")
+        assert result == "D:/Projects/myapp"
+
+    def test_decode_windows_user_path(self):
+        """Test decoding a Windows user directory encoded path."""
+        result = Project.decode_path("C--Users-test-myproject")
+        assert result == "C:/Users/test/myproject"
+
+    def test_decode_windows_lowercase_drive(self):
+        """Test decoding with lowercase drive letter normalizes to uppercase."""
+        result = Project.decode_path("c--Code-Tools")
+        assert result == "C:/Code/Tools"
+
+    def test_decode_windows_roundtrip(self):
+        """Test encode/decode roundtrip for Windows paths (lossy for dashes)."""
+        original = "C:\\Code\\Tools"
+        encoded = Project.encode_path(original)
+        assert encoded == "C--Code-Tools"
+        decoded = Project.decode_path(encoded)
+        assert decoded == "C:/Code/Tools"  # Forward slashes in decoded output
+
+
+class TestIsEncodedProjectDir:
+    """Tests for is_encoded_project_dir() utility function."""
+
+    def test_unix_encoded_path(self):
+        """Unix-encoded dirs start with dash."""
+        assert is_encoded_project_dir("-Users-me-repo") is True
+
+    def test_unix_root_rejected(self):
+        """A bare dash (filesystem root '/') is rejected — Claude Code never creates it."""
+        assert is_encoded_project_dir("-") is False
+
+    def test_windows_c_drive(self):
+        """Windows C: drive encoded path."""
+        assert is_encoded_project_dir("C--Code-Tools") is True
+
+    def test_windows_d_drive(self):
+        """Windows D: drive encoded path."""
+        assert is_encoded_project_dir("D--Projects-myapp") is True
+
+    def test_windows_lowercase_drive(self):
+        """Windows lowercase drive letter."""
+        assert is_encoded_project_dir("c--Users-test") is True
+
+    def test_rejects_plain_directory(self):
+        """Non-project dirs like 'memory' should be rejected."""
+        assert is_encoded_project_dir("memory") is False
+
+    def test_rejects_pycache(self):
+        """__pycache__ should be rejected."""
+        assert is_encoded_project_dir("__pycache__") is False
+
+    def test_rejects_dotdir(self):
+        """Hidden directories should be rejected."""
+        assert is_encoded_project_dir(".git") is False
+
+    def test_rejects_empty_string(self):
+        """Empty string should be rejected."""
+        assert is_encoded_project_dir("") is False
+
+    def test_rejects_single_letter(self):
+        """Single letter without -- should be rejected."""
+        assert is_encoded_project_dir("C") is False
+
+    def test_rejects_letter_single_dash(self):
+        """Letter with single dash is not a Windows pattern."""
+        assert is_encoded_project_dir("C-something") is False
+
+
+class TestIsAbsolutePath:
+    """Tests for _is_absolute_path() cross-platform helper."""
+
+    def test_unix_absolute(self):
+        from models.project import _is_absolute_path
+
+        assert _is_absolute_path("/Users/test/repo") is True
+
+    def test_unix_root(self):
+        from models.project import _is_absolute_path
+
+        assert _is_absolute_path("/") is True
+
+    def test_windows_backslash(self):
+        from models.project import _is_absolute_path
+
+        assert _is_absolute_path("C:\\Users\\test\\repo") is True
+
+    def test_windows_forward_slash(self):
+        from models.project import _is_absolute_path
+
+        assert _is_absolute_path("C:/Users/test/repo") is True
+
+    def test_windows_lowercase_drive(self):
+        from models.project import _is_absolute_path
+
+        assert _is_absolute_path("d:/Projects/myapp") is True
+
+    def test_windows_unc_backslash(self):
+        from models.project import _is_absolute_path
+
+        assert _is_absolute_path("\\\\server\\share\\folder") is True
+
+    def test_windows_unc_forward_slash(self):
+        from models.project import _is_absolute_path
+
+        assert _is_absolute_path("//server/share/folder") is True
+
+    def test_rejects_relative(self):
+        from models.project import _is_absolute_path
+
+        assert _is_absolute_path("src/main.py") is False
+
+    def test_rejects_bare_drive_letter(self):
+        from models.project import _is_absolute_path
+
+        assert _is_absolute_path("C:") is False
+
+    def test_rejects_empty(self):
+        from models.project import _is_absolute_path
+
+        assert _is_absolute_path("") is False
+
+
+class TestHistoryEncodePathDelegation:
+    """Tests that history.encode_path delegates to the canonical Project.encode_path."""
+
+    def test_unix_path(self):
+        from models.history import encode_path
+
+        assert encode_path("/Users/test/repo") == "-Users-test-repo"
+
+    def test_windows_path(self):
+        from models.history import encode_path
+
+        assert encode_path("C:\\Code\\Tools") == "C--Code-Tools"
+
+    def test_windows_forward_slash(self):
+        from models.history import encode_path
+
+        assert encode_path("C:/Users/test/repo") == "C--Users-test-repo"
+
+
+class TestGetProjectName:
+    """Tests for history.get_project_name() cross-platform behavior."""
+
+    def test_unix_path_returns_last_two_segments(self):
+        from models.history import get_project_name
+
+        assert get_project_name("/Users/me/my-project") == "me/my-project"
+
+    def test_windows_backslash_path_returns_last_two_segments(self):
+        from models.history import get_project_name
+
+        # Without the fix, this returns "C:\\Users\\me\\my-project" (the whole raw path)
+        assert get_project_name("C:\\Users\\me\\my-project") == "me/my-project"
+
+    def test_windows_forward_slash_path(self):
+        from models.history import get_project_name
+
+        assert get_project_name("C:/Users/me/my-project") == "me/my-project"
+
+    def test_single_segment_unix(self):
+        from models.history import get_project_name
+
+        # split("/") on "/repo" gives ["", "repo"] — last 2 joined = "/repo"
+        assert get_project_name("/repo") == "/repo"
+
+    def test_single_segment_windows(self):
+        from models.history import get_project_name
+
+        # normalized "C:\\repo" → "C:/repo", split gives ["C:", "repo"] → "C:/repo"
+        assert get_project_name("C:\\repo") == "C:/repo"
+
+
 class TestFromPath:
     """Tests for Project.from_path() factory method."""
 
-    def test_from_path_absolute(self, temp_claude_dir: Path):
-        """Test creating Project from absolute path."""
+    def test_from_path_absolute(self, temp_claude_dir: Path, tmp_path: Path):
+        """Test creating Project from absolute path (OS-appropriate path)."""
+        project_path = tmp_path / "myproject"
         project = Project.from_path(
-            "/Users/test/myproject",
+            str(project_path),
             claude_projects_dir=temp_claude_dir / "projects",
         )
 
-        assert project.path == "/Users/test/myproject"
-        assert project.encoded_name == "-Users-test-myproject"
+        assert project.path == str(project_path)
+        assert project.encoded_name == Project.encode_path(str(project_path))
         assert project.claude_projects_dir == temp_claude_dir / "projects"
 
-    def test_from_path_with_path_object(self, temp_claude_dir: Path):
-        """Test creating Project from Path object."""
+    def test_from_path_with_path_object(self, temp_claude_dir: Path, tmp_path: Path):
+        """Test creating Project from Path object (OS-appropriate path)."""
+        project_path = tmp_path / "myproject"
         project = Project.from_path(
-            Path("/Users/test/myproject"),
+            project_path,
             claude_projects_dir=temp_claude_dir / "projects",
         )
 
-        assert project.path == "/Users/test/myproject"
-        assert project.encoded_name == "-Users-test-myproject"
+        assert project.path == str(project_path)
+        assert project.encoded_name == Project.encode_path(str(project_path))
 
-    def test_from_path_default_claude_projects_dir(self):
+    def test_from_path_default_claude_projects_dir(self, tmp_path: Path):
         """Test creating Project with default claude_projects_dir."""
-        project = Project.from_path("/Users/test/myproject")
+        project = Project.from_path(tmp_path / "myproject")
 
         assert project.claude_projects_dir == Path.home() / ".claude" / "projects"
 
@@ -942,6 +1144,10 @@ class TestIsGitRepository:
 
         assert project.is_git_repository is False
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="symlink creation requires elevated privileges on Windows",
+    )
     def test_git_symlink_returns_true(self, tmp_path: Path):
         """Test that project with symlinked .git returns True."""
         real_git = tmp_path / "real_git_dir"
@@ -1061,6 +1267,35 @@ class TestExtractRealPathFromSessions:
 
         assert result == "/first/valid/path"
 
+    def test_recognizes_windows_cwd_as_absolute(self, temp_project_dir: Path):
+        """Test that Windows absolute paths (C:\\...) are recognized on any OS."""
+        session_file = temp_project_dir / "test-uuid.jsonl"
+        session_file.write_text('{"cwd": "C:\\\\Users\\\\test\\\\myproject", "type": "user"}\n')
+
+        result = Project._extract_real_path_from_sessions(temp_project_dir)
+
+        # Should be recognized as absolute AND normalized to forward slashes
+        assert result is not None
+        assert result == "C:/Users/test/myproject"
+
+    def test_normalizes_windows_backslashes_to_forward(self, temp_project_dir: Path):
+        """Test that backslashes in Windows cwd are normalized to forward slashes."""
+        session_file = temp_project_dir / "test-uuid.jsonl"
+        session_file.write_text('{"cwd": "D:\\\\Projects\\\\my-app", "type": "user"}\n')
+
+        result = Project._extract_real_path_from_sessions(temp_project_dir)
+
+        assert result == "D:/Projects/my-app"
+
+    def test_windows_forward_slash_cwd_unchanged(self, temp_project_dir: Path):
+        """Test that Windows cwd with forward slashes is returned as-is."""
+        session_file = temp_project_dir / "test-uuid.jsonl"
+        session_file.write_text('{"cwd": "C:/Users/test/myproject", "type": "user"}\n')
+
+        result = Project._extract_real_path_from_sessions(temp_project_dir)
+
+        assert result == "C:/Users/test/myproject"
+
 
 class TestFromEncodedNameSkipPathRecovery:
     """Tests for Project.from_encoded_name() with skip_path_recovery parameter."""
@@ -1155,7 +1390,9 @@ class TestGitRootPath:
         """Project at git root returns its own path."""
         # Create a project at the git repo root
         project = Project.from_path(temp_git_repo, claude_projects_dir=temp_claude_dir / "projects")
-        assert project.git_root_path == str(temp_git_repo)
+        # Compare as Path objects: git outputs forward slashes on Windows,
+        # str(Path) gives backslashes — Path normalises both.
+        assert Path(project.git_root_path) == temp_git_repo
 
     def test_git_root_path_nested(self, temp_claude_dir: Path, temp_git_repo: Path):
         """Nested project returns parent git root."""
@@ -1164,7 +1401,7 @@ class TestGitRootPath:
         nested_dir.mkdir(parents=True)
 
         project = Project.from_path(nested_dir, claude_projects_dir=temp_claude_dir / "projects")
-        assert project.git_root_path == str(temp_git_repo)
+        assert Path(project.git_root_path) == temp_git_repo
 
     def test_git_root_path_non_git(self, temp_claude_dir: Path, tmp_path: Path):
         """Non-git project returns None."""
@@ -1174,10 +1411,12 @@ class TestGitRootPath:
         project = Project.from_path(non_git_dir, claude_projects_dir=temp_claude_dir / "projects")
         assert project.git_root_path is None
 
-    def test_git_root_path_nonexistent_path(self, temp_claude_dir: Path):
+    def test_git_root_path_nonexistent_path(self, temp_claude_dir: Path, tmp_path: Path):
         """Nonexistent path returns None gracefully."""
+        nonexistent = tmp_path / "does-not-exist"
+        # Note: do NOT call mkdir — the path must not exist
         project = Project.from_path(
-            "/nonexistent/path/that/does/not/exist",
+            nonexistent,
             claude_projects_dir=temp_claude_dir / "projects",
         )
         assert project.git_root_path is None

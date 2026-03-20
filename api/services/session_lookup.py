@@ -13,6 +13,7 @@ from typing import Optional
 
 from config import settings
 from models import Agent, Session
+from utils import is_encoded_project_dir
 
 logger = logging.getLogger(__name__)
 
@@ -237,7 +238,7 @@ def find_session_by_message_uuid(message_uuid: str) -> Optional[SessionLookupRes
         return None
 
     for encoded_dir in projects_dir.iterdir():
-        if not encoded_dir.is_dir() or not encoded_dir.name.startswith("-"):
+        if not encoded_dir.is_dir() or not is_encoded_project_dir(encoded_dir.name):
             continue
 
         for jsonl_path in encoded_dir.glob("*.jsonl"):

@@ -97,16 +97,25 @@ class ArchivedProject:
 
 
 def encode_path(path: str) -> str:
-    """Encode a path to Claude's format: /Users/me/repo -> -Users-me-repo"""
-    if path.startswith("/"):
-        return "-" + path[1:].replace("/", "-")
-    return path.replace("/", "-")
+    """Encode a path to Claude's format.
+
+    Delegates to the canonical Project.encode_path() which handles
+    both Unix and Windows paths correctly.
+
+    Unix:    /Users/me/repo  -> -Users-me-repo
+    Windows: C:\\Code\\Tools -> C--Code-Tools
+    """
+    from models.project import Project
+
+    return Project.encode_path(path)
 
 
 def get_project_name(path: str) -> str:
     """Extract a readable project name from a full path."""
-    # Get last 2 path components for context
-    parts = path.rstrip("/").split("/")
+    # Normalize Windows backslashes before splitting so C:\Users\me\repo
+    # produces "me/repo" instead of the raw backslash string.
+    # Mac/Linux paths are unchanged (no backslashes to normalize).
+    parts = path.replace("\\", "/").rstrip("/").split("/")
     if len(parts) >= 2:
         return "/".join(parts[-2:])
     return parts[-1] if parts else path
@@ -139,7 +148,7 @@ def parse_history_file(history_path: Path) -> list[HistoryEntry]:
     if not history_path.exists():
         return entries
 
-    with open(history_path, "r") as f:
+    with open(history_path, "r", encoding="utf-8", errors="replace") as f:
         for line in f:
             line = line.strip()
             if not line:

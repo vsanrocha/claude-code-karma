@@ -25,6 +25,14 @@ sys.path.insert(0, str(models_path))
 from http_caching import cacheable
 
 logger = logging.getLogger(__name__)
+
+
+class _FallbackToFilesystem(Exception):
+    """Sentinel exception to signal intentional fallback from SQLite to filesystem scanning."""
+
+    pass
+
+
 from models import Project, Session, SessionIndexEntry
 
 # Import analytics calculation function
@@ -70,6 +78,7 @@ from utils import (
     get_initial_prompt,
     get_initial_prompt_from_index,
     get_worktree_mappings_for_project,
+    is_encoded_project_dir,
     list_all_projects,
     normalize_timezone,
     parse_timestamp_range,
@@ -128,7 +137,7 @@ def resolve_project_identifier(identifier: str) -> str:
         is_worktree_project,
     )
 
-    if identifier.startswith("-"):
+    if is_encoded_project_dir(identifier):
         # Safety net: redirect worktree encoded names to real project
         if is_worktree_project(identifier):
             try:
@@ -396,7 +405,7 @@ def list_projects(request: Request):
                 if rows:
                     summaries = []
                     for row in rows:
-                        path = row.get("project_path") or ""
+                        path = (row.get("project_path") or "").replace("\\", "/")
                         encoded_name = row["encoded_name"]
                         is_git = False
                         git_root = None
@@ -668,27 +677,38 @@ def get_project(
                         target=trigger_remote_reindex,
                         daemon=True,
                     ).start()
-        except Exception as e:
-            logger.debug(
-                "Remote session merge in SQLite fast path failed: %s",
-                e,
-            )
 
-        _enrich_chain_titles(session_summaries)
-        return ProjectDetail(
-            path=project.path,
-            encoded_name=project.encoded_name,
-            slug=project.slug,
-            display_name=_remote_display_name or project.display_name,
-            session_count=total_count,
-            agent_count=project.agent_count,
-            exists=project.exists,
-            is_git_repository=project.is_git_repository,
-            git_root_path=project.git_root_path,
-            is_nested_project=project.is_nested_project,
-            sessions=session_summaries,
-            remote_session_count=remote_session_count,
-        )
+                # Bug fix: If SQLite returns 0 sessions but files exist on disk, fall back to filesystem
+                if total_count == 0:
+                    # Check if any .jsonl session files exist on disk
+                    session_files = list(project.project_dir.glob("*.jsonl"))
+                    if session_files:
+                        logger.info(
+                            "SQLite reports 0 sessions but %d .jsonl files found on disk, falling back to filesystem",
+                            len(session_files),
+                        )
+                        # Fall through to filesystem scan below
+                        raise _FallbackToFilesystem()
+
+                _enrich_chain_titles(session_summaries)
+                return ProjectDetail(
+                    path=project.path,
+                    encoded_name=project.encoded_name,
+                    slug=project.slug,
+                    display_name=_remote_display_name or project.display_name,
+                    session_count=total_count,
+                    agent_count=project.agent_count,
+                    exists=project.exists,
+                    is_git_repository=project.is_git_repository,
+                    git_root_path=project.git_root_path,
+                    is_nested_project=project.is_nested_project,
+                    sessions=session_summaries,
+                    remote_session_count=remote_session_count,
+                )
+    except _FallbackToFilesystem:
+        logger.info("SQLite/filesystem mismatch, falling back to filesystem scan")
+    except Exception as e:
+        logger.warning("SQLite project sessions query failed, falling back: %s", e)
 
     sessions = project.list_sessions()
     # Filter out empty sessions (no messages = no valid start_time)
