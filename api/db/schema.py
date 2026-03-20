@@ -10,7 +10,7 @@ import sqlite3
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
 
 SCHEMA_SQL = """
 -- Schema versioning
@@ -615,6 +615,24 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             conn.execute("CREATE INDEX idx_events_type ON sync_events(event_type)")
             conn.execute("CREATE INDEX idx_events_team ON sync_events(team_name)")
             conn.execute("CREATE INDEX idx_events_time ON sync_events(created_at)")
+
+        if current_version < 20:
+            logger.info(
+                "Migrating → v20: normalize remote_user_id from bare user_id to member_tag"
+            )
+            conn.execute("""
+                UPDATE sessions SET remote_user_id = (
+                    SELECT m.member_tag FROM sync_members m
+                    WHERE m.user_id = sessions.remote_user_id
+                    LIMIT 1
+                ) WHERE source = 'remote'
+                  AND remote_user_id IS NOT NULL
+                  AND remote_user_id NOT LIKE '%.%'
+                  AND EXISTS (
+                      SELECT 1 FROM sync_members m
+                      WHERE m.user_id = sessions.remote_user_id
+                  )
+            """)
 
     # Record version
     conn.execute(

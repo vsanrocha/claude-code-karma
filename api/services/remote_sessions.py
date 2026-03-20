@@ -299,6 +299,8 @@ def _resolve_user_id(user_dir: Path, conn=None) -> str:
     """
     Resolve a clean user_id for a remote-sessions user directory.
 
+    # NOTE: remote_user_id should always be member_tag format (e.g., "jay.mac"), not bare user_id.
+
     The directory name may be a machine hostname (e.g. 'Jayants-Mac-mini.local')
     when Syncthing creates the folder. The manifest.json inside each project
     subdirectory contains the canonical user_id set by the sender.
@@ -359,9 +361,18 @@ def _resolve_user_id(user_dir: Path, conn=None) -> str:
                     except Exception:
                         pass
 
-                # Priority 2: manifest user_id (no DB match)
+                # Priority 2: manifest user_id (no DB match by device_id)
                 if manifest_uid:
                     resolved = manifest_uid
+                    # Normalize bare user_id to full member_tag via DB
+                    if conn is not None and "." not in manifest_uid:
+                        try:
+                            from repositories.member_repo import MemberRepository
+                            members = MemberRepository().get_by_user_id(conn, manifest_uid)
+                            if members:
+                                resolved = members[0].member_tag
+                        except Exception:
+                            pass
                 break
     except (json.JSONDecodeError, OSError) as e:
         logger.debug("Failed to resolve user_id from manifest in %s: %s", dir_name, e)
@@ -382,6 +393,17 @@ def _resolve_user_id(user_dir: Path, conn=None) -> str:
                 and machine_part not in _HOSTNAME_SUFFIXES
                 and re.match(r"^[a-z0-9][a-z0-9-]*$", machine_part)):
             resolved = parsed_uid
+
+    # Final normalization: if resolved is a bare user_id (no dot),
+    # attempt to resolve to full member_tag via DB lookup.
+    if conn is not None and "." not in resolved:
+        try:
+            from repositories.member_repo import MemberRepository
+            members = MemberRepository().get_by_user_id(conn, resolved)
+            if members:
+                resolved = members[0].member_tag
+        except Exception:
+            pass
 
     _resolved_user_cache[dir_name] = (now, resolved)
     return resolved
