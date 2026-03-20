@@ -32,7 +32,7 @@
 	let activeTab = $state('overview');
 	let tabsReady = $state(false);
 
-	let displayName = $derived(data.profile?.user_id ?? data.deviceId);
+	let displayName = $derived(data.profile?.user_id ?? data.memberTag);
 	let hexColor = $derived(getTeamMemberHexColor(displayName));
 	let profile = $derived(data.profile);
 

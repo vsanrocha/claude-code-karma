@@ -4,6 +4,8 @@ import { safeFetch } from '$lib/utils/api-fetch';
 
 interface MemberListItem {
 	name: string;
+	member_tag: string;
+	machine_tag: string;
 	device_id: string;
 	connected: boolean;
 	is_you: boolean;

@@ -114,7 +114,7 @@
 				params.set('source', 'local');
 			} else {
 				params.set('source', 'remote');
-				params.set('user', profile.user_id);
+				params.set('user', profile.member_tag);
 			}
 			const res = await fetch(`${API_BASE}/sessions/all?${params}`);
 			if (!res.ok) {

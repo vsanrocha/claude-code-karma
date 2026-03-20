@@ -144,11 +144,11 @@
 
 	<!-- Members Grid -->
 	<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" use:listNavigation>
-		{#each filteredMembers() as member (member.device_id)}
+		{#each filteredMembers() as member (member.member_tag)}
 			{@const colors = getTeamMemberColor(member.name)}
 			{@const hexColor = getTeamMemberHexColor(member.name)}
 			<a
-				href="/members/{encodeURIComponent(member.device_id)}"
+				href="/members/{encodeURIComponent(member.member_tag)}"
 				class="flex items-center gap-4 p-4 rounded-lg border border-[var(--border)] bg-[var(--bg-base)] hover:border-[var(--accent)]/30 hover:shadow-sm transition-all"
 			data-list-item
 			>
