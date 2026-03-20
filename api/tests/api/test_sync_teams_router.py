@@ -59,11 +59,12 @@ def mock_pairing_svc():
 @pytest.fixture
 def client(conn, mock_config, mock_team_svc, mock_pairing_svc):
     from routers.sync_teams import router, get_team_svc, get_pairing_svc
-    from routers.sync_deps import get_conn, require_config
+    from routers.sync_deps import get_conn, get_read_conn, require_config
 
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[get_conn] = lambda: conn
+    app.dependency_overrides[get_read_conn] = lambda: conn
     app.dependency_overrides[require_config] = lambda: mock_config
     app.dependency_overrides[get_team_svc] = lambda: mock_team_svc
     app.dependency_overrides[get_pairing_svc] = lambda: mock_pairing_svc

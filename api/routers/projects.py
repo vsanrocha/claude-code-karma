@@ -705,10 +705,10 @@ def get_project(
                     sessions=session_summaries,
                     remote_session_count=remote_session_count,
                 )
-    except _FallbackToFilesystem:
-        logger.info("SQLite/filesystem mismatch, falling back to filesystem scan")
-    except Exception as e:
-        logger.warning("SQLite project sessions query failed, falling back: %s", e)
+        except _FallbackToFilesystem:
+            logger.info("SQLite/filesystem mismatch, falling back to filesystem scan")
+        except Exception as e:
+            logger.warning("SQLite project sessions query failed, falling back: %s", e)
 
     sessions = project.list_sessions()
     # Filter out empty sessions (no messages = no valid start_time)

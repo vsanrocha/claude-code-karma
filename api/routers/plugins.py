@@ -33,7 +33,6 @@ from models.plugin import (
     read_plugin_manifest,
     resolve_manifest_dirs,
     scan_plugin_capabilities,
-    _resolve_manifest_dirs,
 )
 from schemas import (
     DailyUsage,

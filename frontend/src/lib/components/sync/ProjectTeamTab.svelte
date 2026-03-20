@@ -4,7 +4,7 @@
 	import type { RemoteSessionUser, StatItem } from '$lib/api-types';
 	import StatsGrid from '$lib/components/StatsGrid.svelte';
 	import SessionCard from '$lib/components/SessionCard.svelte';
-	import { formatRelativeTime, formatDuration, formatCost, getTeamMemberColor, cleanPromptText } from '$lib/utils';
+	import { formatRelativeTime, formatDuration, formatCost, getTeamMemberColor, cleanPromptText, truncate } from '$lib/utils';
 
 	let {
 		projectEncodedName,
@@ -154,10 +154,6 @@
 		return model.replace(/^claude-/, '').split('-').slice(0, 2).join(' ');
 	}
 
-	function truncate(text: string, maxLen: number): string {
-		if (text.length <= maxLen) return text;
-		return text.slice(0, maxLen).trimEnd() + '\u2026';
-	}
 </script>
 
 <div class="space-y-6">

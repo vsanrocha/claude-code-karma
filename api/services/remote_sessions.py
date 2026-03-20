@@ -30,7 +30,7 @@ from typing import Iterator, Optional
 
 from config import settings
 from models import Session
-from services.folder_id import parse_member_tag
+from services.syncthing.folder_manager import parse_member_tag
 from services.session_filter import SessionMetadata
 
 logger = logging.getLogger(__name__)

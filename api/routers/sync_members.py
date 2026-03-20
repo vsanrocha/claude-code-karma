@@ -1,6 +1,7 @@
 """Sync Members router — cross-team member listing and member profiles."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import sqlite3
@@ -8,7 +9,20 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from routers.sync_deps import get_conn, get_optional_config, make_repos
+from db.queries import (
+    query_last_packaged_timestamp,
+    query_member_daily_sync_stats,
+    query_member_last_active,
+    query_member_local_session_count,
+    query_member_received_count,
+    query_member_remote_sessions_count,
+    query_member_sent_count,
+    query_member_session_count,
+    query_member_subscription_count,
+    query_member_total_sessions,
+    query_resolve_project,
+)
+from routers.sync_deps import get_optional_config, get_read_conn, make_repos
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +70,7 @@ def _event_dict(e, idx: int = 0) -> dict:
 
 @router.get("/members")
 async def list_members(
-    conn: sqlite3.Connection = Depends(get_conn),
+    conn: sqlite3.Connection = Depends(get_read_conn),
     config=Depends(get_optional_config),
 ):
     """List all members across all teams, deduplicated by device_id."""
@@ -98,7 +112,7 @@ async def list_members(
                 }
 
     # Fetch connection status once
-    connections = _get_connections(config)
+    connections = await asyncio.to_thread(_get_connections, config)
 
     result = []
     for entry in members_by_tag.values():
@@ -129,7 +143,7 @@ async def list_members(
 @router.get("/members/{identifier}")
 async def get_member_profile(
     identifier: str,
-    conn: sqlite3.Connection = Depends(get_conn),
+    conn: sqlite3.Connection = Depends(get_read_conn),
     config=Depends(get_optional_config),
 ):
     """Full member profile. Accepts member_tag or device_id (auto-detected)."""
@@ -172,7 +186,7 @@ async def get_member_profile(
         else None
     )
     my_member_tag = config.member_tag if config else None
-    connections = _get_connections(config)
+    connections = await asyncio.to_thread(_get_connections, config)
     conn_entry = connections.get(device_id, {}) if device_id else {}
     is_you = member_tag == my_member_tag if my_member_tag else False
     connected = is_you or bool(conn_entry.get("connected", False))
@@ -199,17 +213,12 @@ async def get_member_profile(
         for p in team_projects:
             if p.status.value != "shared":
                 continue
-            enc, display = _resolve_project(conn, p.git_identity)
+            enc, display = query_resolve_project(conn, p.git_identity)
             display = display or p.git_identity
             sess_count = 0
             if enc:
                 all_project_encoded.add(enc)
-                row = conn.execute(
-                    "SELECT COUNT(*) FROM sessions WHERE project_encoded_name = ?",
-                    (enc,),
-                ).fetchone()
-                if row:
-                    sess_count = row[0]
+                sess_count = query_member_session_count(conn, enc)
             proj_list.append({
                 "encoded_name": enc or p.git_identity,
                 "name": display,
@@ -229,12 +238,7 @@ async def get_member_profile(
     received_count = 0
     total_sessions = 0
 
-    sent_row = conn.execute(
-        "SELECT COUNT(*) FROM sync_events WHERE event_type = 'session_packaged' AND member_tag = ?",
-        (member_tag,),
-    ).fetchone()
-    if sent_row:
-        sent_count = sent_row[0]
+    sent_count = query_member_sent_count(conn, member_tag)
 
     # Fallback: if no packaged events logged yet, count outbox files on disk
     if sent_count == 0 and is_you:
@@ -249,46 +253,24 @@ async def get_member_profile(
                 if sessions_dir.is_dir():
                     sent_count += sum(1 for _ in sessions_dir.glob("*.jsonl"))
 
-    recv_row = conn.execute(
-        "SELECT COUNT(*) FROM sync_events WHERE event_type = 'session_received' AND member_tag = ?",
-        (member_tag,),
-    ).fetchone()
-    if recv_row:
-        received_count = recv_row[0]
+    received_count = query_member_received_count(conn, member_tag)
 
     # Fallback: if no received events but we have remote sessions in DB
     if received_count == 0 and not is_you:
         if all_project_encoded:
-            placeholders = ",".join("?" * len(all_project_encoded))
-            recv_fallback = conn.execute(
-                f"SELECT COUNT(*) FROM sessions WHERE source = 'remote' "
-                f"AND remote_user_id = ? AND project_encoded_name IN ({placeholders})",
-                [member_tag] + list(all_project_encoded),
-            ).fetchone()
-            if recv_fallback:
-                received_count = recv_fallback[0]
+            received_count = query_member_remote_sessions_count(
+                conn, member_tag, list(all_project_encoded)
+            )
 
     if all_project_encoded:
-        placeholders = ",".join("?" * len(all_project_encoded))
-        total_row = conn.execute(
-            f"SELECT COUNT(*) FROM sessions WHERE project_encoded_name IN ({placeholders})",
-            list(all_project_encoded),
-        ).fetchone()
-        if total_row:
-            total_sessions = total_row[0]
+        total_sessions = query_member_total_sessions(
+            conn, list(all_project_encoded)
+        )
 
     # Total distinct projects across subscriptions
-    sub_rows = conn.execute(
-        "SELECT COUNT(DISTINCT project_git_identity) FROM sync_subscriptions WHERE member_tag = ?",
-        (member_tag,),
-    ).fetchone()
-    total_projects = sub_rows[0] if sub_rows else 0
+    total_projects = query_member_subscription_count(conn, member_tag)
 
-    last_active_row = conn.execute(
-        "SELECT MAX(created_at) FROM sync_events WHERE member_tag = ?",
-        (member_tag,),
-    ).fetchone()
-    last_active = last_active_row[0] if last_active_row and last_active_row[0] else None
+    last_active = query_member_last_active(conn, member_tag)
 
     stats = {
         "total_sessions": total_sessions,
@@ -299,13 +281,7 @@ async def get_member_profile(
     }
 
     # Session stats: daily sent/received aggregation
-    session_stats_rows = conn.execute(
-        "SELECT date(created_at) as d, event_type, COUNT(*) "
-        "FROM sync_events "
-        "WHERE member_tag = ? AND event_type IN ('session_packaged', 'session_received') "
-        "GROUP BY d, event_type ORDER BY d",
-        (member_tag,),
-    ).fetchall()
+    session_stats_rows = query_member_daily_sync_stats(conn, member_tag)
 
     daily: dict[str, dict] = {}
     for date_str, etype, cnt in session_stats_rows:
@@ -343,14 +319,10 @@ async def get_member_profile(
             for p in team_projects:
                 if p.status.value != "shared":
                     continue
-                enc, display = _resolve_project(conn, p.git_identity)
+                enc, display = query_resolve_project(conn, p.git_identity)
                 local_count = 0
                 if enc:
-                    row = conn.execute(
-                        "SELECT COUNT(*) FROM sessions WHERE project_encoded_name = ? AND (source IS NULL OR source != 'remote')",
-                        (enc,),
-                    ).fetchone()
-                    local_count = row[0] if row else 0
+                    local_count = query_member_local_session_count(conn, enc)
                 packaged_count = _count_packaged(member_tag, p.folder_suffix)
                 active_count = active_counts.get(enc, 0) if enc else 0
                 gap = max(0, local_count - packaged_count - active_count)
@@ -368,10 +340,7 @@ async def get_member_profile(
         unsynced_count = total_gap
         project_sync = project_sync_list
 
-        lp_row = conn.execute(
-            "SELECT MAX(created_at) FROM sync_events WHERE event_type = 'session_packaged'"
-        ).fetchone()
-        last_packaged_at = lp_row[0] if lp_row and lp_row[0] else None
+        last_packaged_at = query_last_packaged_timestamp(conn)
 
     # sync_direction: aggregate from accepted subscriptions
     subs = repos["subs"].list_for_member(conn, member_tag)
@@ -408,25 +377,5 @@ async def get_member_profile(
     }
 
 
-# ---------------------------------------------------------------------------
-# Git identity resolution (mirrors indexer.py pattern)
-# ---------------------------------------------------------------------------
 
-def _resolve_project(conn: sqlite3.Connection, git_identity: str) -> tuple[str | None, str | None]:
-    """Resolve a sync project's git_identity to (encoded_name, display_name)."""
-    norm = (git_identity or "").rstrip("/").lower()
-    if norm.endswith(".git"):
-        norm = norm[:-4]
-    if not norm:
-        return None, None
-    rows = conn.execute(
-        "SELECT encoded_name, git_identity, display_name FROM projects "
-        "WHERE git_identity IS NOT NULL"
-    ).fetchall()
-    for enc, local_git, display in rows:
-        lg = (local_git or "").rstrip("/").lower()
-        if lg.endswith(".git"):
-            lg = lg[:-4]
-        if lg and (lg in norm or norm in lg or lg.endswith(norm) or norm.endswith(lg)):
-            return enc, display
-    return None, None
+# _resolve_project has been moved to db.queries.query_resolve_project

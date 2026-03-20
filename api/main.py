@@ -124,7 +124,7 @@ async def lifespan(app: FastAPI):
     session_watcher_mgr = None
     if settings.use_sqlite:
         try:
-            from karma.config import SyncConfig
+            from models.sync_config import SyncConfig
             config = SyncConfig.load()
             if config and config.member_tag:
                 from db.connection import get_writer_db

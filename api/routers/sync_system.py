@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from routers.sync_deps import (
     get_conn,
     get_optional_config,
+    get_read_conn,
     make_reconciliation_service,
     make_repos,
     require_config,
@@ -45,7 +46,7 @@ async def get_recon_svc(config=Depends(require_config)):
 
 @router.get("/status")
 async def sync_status(
-    conn: sqlite3.Connection = Depends(get_conn),
+    conn: sqlite3.Connection = Depends(get_read_conn),
     config=Depends(get_optional_config),
 ):
     """Sync configuration and team summary."""
@@ -80,8 +81,8 @@ async def sync_init(req: InitRequest):
     if req.backend != "syncthing":
         raise HTTPException(400, "Only 'syncthing' backend is supported")
 
-    from karma.config import SyncConfig, SyncthingSettings
-    from karma.syncthing import read_local_api_key
+    from models.sync_config import SyncConfig, SyncthingSettings
+    from services.syncthing.key_reader import read_local_api_key
     from services.syncthing.client import SyncthingClient
 
     api_key = read_local_api_key()
@@ -180,7 +181,7 @@ async def sync_detect():
     syncthing_installed = shutil.which("syncthing") is not None
 
     try:
-        from karma.syncthing import read_local_api_key
+        from services.syncthing.key_reader import read_local_api_key
         from services.syncthing.client import SyncthingClient
 
         api_key = read_local_api_key()
@@ -218,7 +219,7 @@ async def sync_detect():
 @router.post("/reset")
 async def sync_reset(options: Optional[ResetOptions] = None):
     """Full sync teardown — clean Syncthing, delete files, clear DB."""
-    from karma.config import SYNC_CONFIG_PATH, KARMA_BASE
+    from models.sync_config import SYNC_CONFIG_PATH, KARMA_BASE
 
     if options is None:
         options = ResetOptions()
@@ -227,7 +228,7 @@ async def sync_reset(options: Optional[ResetOptions] = None):
 
     # 1. Clean Syncthing config (best-effort)
     try:
-        from karma.syncthing import read_local_api_key
+        from services.syncthing.key_reader import read_local_api_key
         from services.syncthing.client import SyncthingClient
 
         api_key = read_local_api_key()
@@ -276,7 +277,9 @@ async def sync_reset(options: Optional[ResetOptions] = None):
         steps["config_deleted"] = True
 
     # 4. Clear v4 sync tables
-    conn = get_conn()
+    from db.connection import get_writer_db
+
+    conn = get_writer_db()
     tables_cleared = []
     for table in [
         "sync_subscriptions",

@@ -4,12 +4,11 @@
 	import TeamCard from '$lib/components/team/TeamCard.svelte';
 	import CreateTeamDialog from '$lib/components/team/CreateTeamDialog.svelte';
 	import PendingInvitationCard from '$lib/components/sync/PendingInvitationCard.svelte';
-	import { Users, Plus, ArrowRight, FolderSync, Contact, Crown, UserPlus, Copy, Check } from 'lucide-svelte';
+	import { Users, Plus, ArrowRight, FolderSync, Contact, Crown, UserPlus } from 'lucide-svelte';
 	import { goto, invalidateAll } from '$app/navigation';
 	import { listNavigation } from '$lib/actions/listNavigation';
-	import { copyToClipboard } from '$lib/utils';
-	import { API_BASE } from '$lib/config';
 	import type { StatItem } from '$lib/api-types';
+	import PairingCodeCard from '$lib/components/shared/PairingCodeCard.svelte';
 
 	let { data } = $props();
 
@@ -17,42 +16,6 @@
 
 	let configured = $derived(data.syncStatus?.configured ?? false);
 	let teams = $derived(data.teams ?? []);
-
-	// ── Pairing code for the "Join a Team" card ──────────────────────────
-	let pairingCode = $state<string | null>(null);
-	let pairingMemberTag = $state<string | null>(null);
-	let pairingLoading = $state(true);
-	let copiedCode = $state(false);
-
-	async function loadPairingCode() {
-		try {
-			const res = await fetch(`${API_BASE}/sync/pairing/code`);
-			if (res.ok) {
-				const data = await res.json();
-				pairingCode = data.code;
-				pairingMemberTag = data.member_tag ?? null;
-			}
-		} catch {
-			/* non-critical */
-		} finally {
-			pairingLoading = false;
-		}
-	}
-
-	async function copyPairingCode() {
-		if (!pairingCode) return;
-		const ok = await copyToClipboard(pairingCode);
-		if (ok) {
-			copiedCode = true;
-			setTimeout(() => (copiedCode = false), 2000);
-		}
-	}
-
-	$effect(() => {
-		if (configured && teams.length === 0) {
-			loadPairingCode();
-		}
-	});
 
 	// Current user's member tag (to exclude self from counts)
 	let myTag = $derived(data.syncStatus?.member_tag);
@@ -190,48 +153,7 @@
 
 					<!-- Pairing code display -->
 					<div class="mt-auto">
-						{#if pairingLoading}
-							<!-- Skeleton loader -->
-							<div class="flex items-center gap-2">
-								<div class="flex-1 h-10 rounded-lg bg-[var(--bg-muted)] animate-pulse"></div>
-								<div class="w-10 h-10 rounded-lg bg-[var(--bg-muted)] animate-pulse"></div>
-							</div>
-						{:else if pairingCode}
-							<div class="flex items-center gap-2">
-								<div
-									class="flex-1 px-3 py-2.5 rounded-lg bg-[var(--bg-muted)] border border-[var(--border)]
-										font-mono text-sm text-[var(--text-primary)] tracking-wide select-all truncate"
-								>
-									{pairingCode}
-								</div>
-								<button
-									onclick={copyPairingCode}
-									aria-label={copiedCode ? 'Copied' : 'Copy pairing code'}
-									class="flex items-center justify-center w-10 h-10 rounded-lg border border-[var(--border)]
-										bg-[var(--bg-subtle)] hover:bg-[var(--bg-muted)] transition-colors cursor-pointer
-										{copiedCode ? 'text-[var(--success)]' : 'text-[var(--text-muted)]'}"
-								>
-									{#if copiedCode}
-										<Check size={16} />
-									{:else}
-										<Copy size={16} />
-									{/if}
-								</button>
-							</div>
-							{#if pairingMemberTag}
-								<p class="mt-2 text-xs text-[var(--text-faint)]">
-									Your identity: <span class="font-mono text-[var(--text-muted)]">{pairingMemberTag}</span>
-								</p>
-							{/if}
-						{:else}
-							<!-- Error / unavailable state -->
-							<div
-								class="px-3 py-2.5 rounded-lg bg-[var(--bg-muted)] border border-[var(--border)]
-									text-xs text-[var(--text-muted)] text-center"
-							>
-								Pairing code unavailable. Check <a href="/sync" class="text-[var(--accent)] hover:underline">/sync</a> setup.
-							</div>
-						{/if}
+						<PairingCodeCard variant="inline" />
 					</div>
 				</div>
 			</div>

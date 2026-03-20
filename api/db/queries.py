@@ -84,7 +84,7 @@ def _resolve_user_names(conn: sqlite3.Connection, user_ids: list[str]) -> dict[s
         return {}
     placeholders = ",".join("?" * len(user_ids))
     rows = conn.execute(
-        f"SELECT DISTINCT device_id, name FROM sync_members WHERE device_id IN ({placeholders})",
+        f"SELECT DISTINCT device_id, member_tag as name FROM sync_members WHERE device_id IN ({placeholders})",
         user_ids,
     ).fetchall()
     return {row["device_id"]: row["name"] for row in rows}
@@ -4211,3 +4211,190 @@ def query_session_tool_breakdown(
             return None, {}
 
     return session_counts, subagent_counts
+
+
+# ---------------------------------------------------------------------------
+# Sync member query helpers
+# ---------------------------------------------------------------------------
+
+
+def _batched_in_query(
+    conn: sqlite3.Connection,
+    sql_template: str,
+    items: list,
+    extra_params: list | None = None,
+    batch_size: int = 500,
+) -> list:
+    """Execute query with IN clause in batches to avoid SQLITE_MAX_VARIABLE_NUMBER.
+
+    ``sql_template`` must contain a ``{placeholders}`` token that will be
+    replaced with the comma-separated ``?`` markers for each batch.
+    ``extra_params``, if given, are prepended to each batch's parameter list.
+    """
+    if not items:
+        return []
+    results: list = []
+    prefix = extra_params or []
+    for i in range(0, len(items), batch_size):
+        batch = items[i : i + batch_size]
+        placeholders = ",".join("?" * len(batch))
+        sql = sql_template.format(placeholders=placeholders)
+        results.extend(conn.execute(sql, prefix + batch).fetchall())
+    return results
+
+
+def query_member_session_count(
+    conn: sqlite3.Connection, encoded_name: str
+) -> int:
+    """Count sessions for a given project encoded_name."""
+    row = conn.execute(
+        "SELECT COUNT(*) FROM sessions WHERE project_encoded_name = ?",
+        (encoded_name,),
+    ).fetchone()
+    return row[0] if row else 0
+
+
+def query_member_local_session_count(
+    conn: sqlite3.Connection, encoded_name: str
+) -> int:
+    """Count local (non-remote) sessions for a given project encoded_name."""
+    row = conn.execute(
+        "SELECT COUNT(*) FROM sessions WHERE project_encoded_name = ? "
+        "AND (source IS NULL OR source != 'remote')",
+        (encoded_name,),
+    ).fetchone()
+    return row[0] if row else 0
+
+
+def query_member_sent_count(
+    conn: sqlite3.Connection, member_tag: str
+) -> int:
+    """Count 'session_packaged' sync events for a member."""
+    row = conn.execute(
+        "SELECT COUNT(*) FROM sync_events "
+        "WHERE event_type = 'session_packaged' AND member_tag = ?",
+        (member_tag,),
+    ).fetchone()
+    return row[0] if row else 0
+
+
+def query_member_received_count(
+    conn: sqlite3.Connection, member_tag: str
+) -> int:
+    """Count 'session_received' sync events for a member."""
+    row = conn.execute(
+        "SELECT COUNT(*) FROM sync_events "
+        "WHERE event_type = 'session_received' AND member_tag = ?",
+        (member_tag,),
+    ).fetchone()
+    return row[0] if row else 0
+
+
+def query_member_remote_sessions_count(
+    conn: sqlite3.Connection, member_tag: str, project_encoded_names: list[str]
+) -> int:
+    """Count remote sessions attributed to a member across projects.
+
+    Uses batched IN clause to handle large project lists safely.
+    """
+    if not project_encoded_names:
+        return 0
+    rows = _batched_in_query(
+        conn,
+        "SELECT COUNT(*) FROM sessions WHERE source = 'remote' "
+        "AND remote_user_id = ? AND project_encoded_name IN ({placeholders})",
+        list(project_encoded_names),
+        extra_params=[member_tag],
+    )
+    return rows[0][0] if rows else 0
+
+
+def query_member_total_sessions(
+    conn: sqlite3.Connection, project_encoded_names: list[str]
+) -> int:
+    """Count total sessions across a set of projects.
+
+    Uses batched IN clause to handle large project lists safely.
+    """
+    if not project_encoded_names:
+        return 0
+    rows = _batched_in_query(
+        conn,
+        "SELECT COUNT(*) FROM sessions WHERE project_encoded_name IN ({placeholders})",
+        list(project_encoded_names),
+    )
+    # Sum across batches (each batch returns its own COUNT)
+    return sum(r[0] for r in rows) if rows else 0
+
+
+def query_member_subscription_count(
+    conn: sqlite3.Connection, member_tag: str
+) -> int:
+    """Count distinct project subscriptions for a member."""
+    row = conn.execute(
+        "SELECT COUNT(DISTINCT project_git_identity) FROM sync_subscriptions "
+        "WHERE member_tag = ?",
+        (member_tag,),
+    ).fetchone()
+    return row[0] if row else 0
+
+
+def query_member_last_active(
+    conn: sqlite3.Connection, member_tag: str
+) -> str | None:
+    """Get the most recent sync event timestamp for a member."""
+    row = conn.execute(
+        "SELECT MAX(created_at) FROM sync_events WHERE member_tag = ?",
+        (member_tag,),
+    ).fetchone()
+    return row[0] if row and row[0] else None
+
+
+def query_member_daily_sync_stats(
+    conn: sqlite3.Connection, member_tag: str
+) -> list:
+    """Get daily sent/received event counts for a member.
+
+    Returns rows of (date_str, event_type, count).
+    """
+    return conn.execute(
+        "SELECT date(created_at) as d, event_type, COUNT(*) "
+        "FROM sync_events "
+        "WHERE member_tag = ? AND event_type IN ('session_packaged', 'session_received') "
+        "GROUP BY d, event_type ORDER BY d",
+        (member_tag,),
+    ).fetchall()
+
+
+def query_last_packaged_timestamp(conn: sqlite3.Connection) -> str | None:
+    """Get the most recent 'session_packaged' event timestamp (global)."""
+    row = conn.execute(
+        "SELECT MAX(created_at) FROM sync_events WHERE event_type = 'session_packaged'"
+    ).fetchone()
+    return row[0] if row and row[0] else None
+
+
+def query_resolve_project(
+    conn: sqlite3.Connection, git_identity: str
+) -> tuple[str | None, str | None]:
+    """Resolve a sync project's git_identity to (encoded_name, display_name).
+
+    Performs fuzzy matching against the projects table, normalising
+    trailing slashes and ``.git`` suffixes.
+    """
+    norm = (git_identity or "").rstrip("/").lower()
+    if norm.endswith(".git"):
+        norm = norm[:-4]
+    if not norm:
+        return None, None
+    rows = conn.execute(
+        "SELECT encoded_name, git_identity, display_name FROM projects "
+        "WHERE git_identity IS NOT NULL"
+    ).fetchall()
+    for enc, local_git, display in rows:
+        lg = (local_git or "").rstrip("/").lower()
+        if lg.endswith(".git"):
+            lg = lg[:-4]
+        if lg and (lg in norm or norm in lg or lg.endswith(norm) or norm.endswith(lg)):
+            return enc, display
+    return None, None

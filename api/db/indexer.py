@@ -831,12 +831,15 @@ def trigger_remote_reindex() -> dict:
     if not _reindex_lock.acquire(blocking=False):
         return {"status": "skipped"}
     try:
-        from .connection import get_writer_db
+        from .connection import create_writer_connection
 
-        conn = get_writer_db()
-        stats = index_remote_sessions(conn)
-        logger.info("On-demand remote reindex complete: %s", stats)
-        return stats
+        conn = create_writer_connection()
+        try:
+            stats = index_remote_sessions(conn)
+            logger.info("On-demand remote reindex complete: %s", stats)
+            return stats
+        finally:
+            conn.close()
     except Exception as e:
         logger.warning("On-demand remote reindex failed: %s", e)
         return {"status": "error", "error": str(e)}
@@ -1619,7 +1622,7 @@ def _update_project_summaries(conn: sqlite3.Connection) -> None:
         git_identity = known_git_ids.get(encoded_name)
         if git_identity is None and project_path:
             try:
-                from karma.sync import detect_git_identity
+                from utils.git import detect_git_identity
                 git_identity = detect_git_identity(project_path)
             except Exception:
                 pass
@@ -1737,11 +1740,14 @@ async def run_periodic_sync(interval_seconds: int = 300) -> None:
     while True:
         await asyncio.sleep(interval_seconds)
         try:
-            from .connection import get_writer_db
+            from .connection import create_writer_connection
 
-            conn = get_writer_db()
-            stats = await asyncio.to_thread(sync_all_projects, conn)
-            logger.info("Periodic reindex complete: %s", stats)
+            conn = create_writer_connection()
+            try:
+                stats = await asyncio.to_thread(sync_all_projects, conn)
+                logger.info("Periodic reindex complete: %s", stats)
+            finally:
+                conn.close()
         except Exception as e:
             logger.warning("Periodic reindex failed: %s", e)
 
@@ -1753,13 +1759,16 @@ def run_background_sync() -> None:
     Called during API startup to build/refresh the index without
     blocking request handling.
     """
-    from .connection import get_writer_db
+    from .connection import create_writer_connection
 
     try:
         logger.info("Starting background index sync...")
-        conn = get_writer_db()
-        stats = sync_all_projects(conn)
-        logger.info("Background sync complete: %s", stats)
+        conn = create_writer_connection()
+        try:
+            stats = sync_all_projects(conn)
+            logger.info("Background sync complete: %s", stats)
+        finally:
+            conn.close()
     except Exception as e:
         logger.error("Background sync failed: %s", e)
         # Still mark as ready so the API falls back to old code path

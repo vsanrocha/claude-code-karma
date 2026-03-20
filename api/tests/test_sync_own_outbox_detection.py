@@ -6,15 +6,50 @@ jayants-mac-mini-local"). The joiner's _is_own_outbox check then fails
 to recognize the folder as its own outbox, causing it to be misclassified
 as "sessions" instead of "outbox" and merged with the leader's real outbox
 (device_count=2).
+
+Note: ``build_own_names`` was originally in ``services.sync_identity_match``
+(deleted as dead v3 code).  The function is inlined here so the test
+remains self-contained.
 """
 from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from services.sync_identity_match import build_own_names
+# Domain suffixes commonly stripped by Syncthing device name sanitization.
+_HOSTNAME_SUFFIXES = (".local", ".lan", ".home", ".internal", ".localdomain")
+
+
+def _sanitize_hostname(raw: str) -> str:
+    """Strip domain suffix and lowercase."""
+    lower = raw.strip().lower()
+    for suffix in _HOSTNAME_SUFFIXES:
+        if lower.endswith(suffix):
+            return lower[: -len(suffix)]
+    return lower
+
+
+def build_own_names(
+    user_id: Optional[str],
+    machine_id: Optional[str],
+    machine_tag: Optional[str],
+    member_tag: Optional[str],
+) -> set[str]:
+    """Build the set of all name variants that identify this machine."""
+    names: set[str] = set()
+    if user_id:
+        names.add(user_id)
+    if machine_id:
+        names.add(machine_id)
+        names.add(_sanitize_hostname(machine_id))
+    if machine_tag:
+        names.add(machine_tag)
+    if member_tag:
+        names.add(member_tag)
+    return names
 
 
 class TestBuildOwnNames:
@@ -81,7 +116,7 @@ class TestIsOwnOutbox:
     def test_recognizes_sanitized_hostname_folder(self):
         """Reproduce the exact bug: leader creates karma-out--jayants-mac-mini--suffix
         but joiner's member_tag is jay-mac-mini.jayants-mac-mini-local."""
-        from services.folder_id import parse_outbox_id
+        from services.syncthing.folder_manager import parse_outbox_id
 
         # Leader created inbox with sanitized hostname
         folder_id = "karma-out--jayants-mac-mini--the-non-expert-humanassaince"

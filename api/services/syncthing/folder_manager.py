@@ -3,6 +3,9 @@ FolderManager — high-level operations on Syncthing folder configuration.
 
 Wraps SyncthingClient to provide idempotent folder creation/deletion and
 declarative device-list management for karma outbox/inbox/metadata folders.
+
+Also provides folder-ID parsing utilities (``parse_member_tag``,
+``parse_outbox_id``) that were previously in ``services.folder_id``.
 """
 
 import logging
@@ -13,6 +16,13 @@ from typing import List, Optional, Set
 from services.syncthing.client import SyncthingClient
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+OUTBOX_PREFIX = "karma-out--"
 
 
 # ---------------------------------------------------------------------------
@@ -28,6 +38,35 @@ def build_outbox_folder_id(member_tag: str, suffix: str) -> str:
 def build_metadata_folder_id(team_name: str) -> str:
     """Return the Syncthing folder ID for a team metadata folder."""
     return f"karma-meta--{team_name}"
+
+
+def parse_outbox_id(folder_id: str) -> Optional[tuple[str, str]]:
+    """Parse ``karma-out--{username}--{suffix}`` into ``(username, suffix)``.
+
+    Returns ``None`` if the folder ID does not match the expected format.
+    """
+    if not folder_id.startswith(OUTBOX_PREFIX):
+        return None
+    rest = folder_id[len(OUTBOX_PREFIX):]
+    parts = rest.split("--")
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        return None
+    return parts[0], parts[1]
+
+
+def parse_member_tag(member_tag: str) -> tuple[str, Optional[str]]:
+    """Parse member_tag into (user_id, machine_tag).
+
+    Format: ``{user_id}.{machine_tag}`` or bare ``{user_id}`` (legacy).
+    Splits on the FIRST dot only.
+
+    Returns:
+        (user_id, machine_tag) -- machine_tag is None if no dot present.
+    """
+    if "." in member_tag:
+        user_id, machine_tag_part = member_tag.split(".", 1)
+        return user_id, machine_tag_part
+    return member_tag, None
 
 
 # ---------------------------------------------------------------------------

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { API_BASE } from '$lib/config';
 	import {
 		FolderSync,
@@ -251,7 +252,7 @@
 		}
 	}
 
-	$effect(() => {
+	onMount(() => {
 		loadProjectStatus();
 	});
 </script>

@@ -13,6 +13,7 @@ from domain.team import AuthorizationError, InvalidTransitionError
 from domain.project import SharedProjectStatus
 from routers.sync_deps import (
     get_conn,
+    get_read_conn,
     make_project_service,
     make_repos,
     require_config,
@@ -95,7 +96,7 @@ async def remove_project(
 
 
 @router.get("/teams/{name}/projects")
-async def list_projects(name: str, conn: sqlite3.Connection = Depends(get_conn)):
+async def list_projects(name: str, conn: sqlite3.Connection = Depends(get_read_conn)):
     """List projects shared in the team."""
     repos = make_repos()
     team = repos["teams"].get(conn, name)
@@ -253,7 +254,7 @@ async def change_direction(
 
 @router.get("/subscriptions")
 async def list_subscriptions(
-    conn: sqlite3.Connection = Depends(get_conn),
+    conn: sqlite3.Connection = Depends(get_read_conn),
     config=Depends(require_config),
 ):
     """List all subscriptions for the current member."""

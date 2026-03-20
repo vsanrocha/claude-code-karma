@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Optional
 
 from config import settings
-from services.folder_id import parse_member_tag
+from services.syncthing.folder_manager import parse_member_tag
 
 logger = logging.getLogger(__name__)
 

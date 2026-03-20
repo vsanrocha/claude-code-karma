@@ -65,7 +65,7 @@
 		<div>
 			<div class="flex items-center gap-2">
 				<a
-					href="/members/{encodeURIComponent(member.device_id || member.member_tag)}"
+					href="/members/{encodeURIComponent(member.member_tag || member.device_id)}"
 					class="text-sm font-medium text-[var(--text-primary)] hover:text-[var(--accent)] transition-colors"
 				>
 					{displayName}

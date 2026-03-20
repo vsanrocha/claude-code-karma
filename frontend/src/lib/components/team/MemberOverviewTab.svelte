@@ -388,7 +388,7 @@
 				{/if}
 			</div>
 			<div class="rounded-lg border border-[var(--border)] bg-[var(--bg-subtle)] divide-y divide-[var(--border-subtle)]">
-				{#each recentActivity as event (event.id)}
+				{#each recentActivity as event, i (event.created_at + '-' + i)}
 					<div class="flex items-center justify-between gap-3 px-4 py-2.5">
 						<p class="text-xs text-[var(--text-secondary)] truncate flex-1">
 							{formatSyncEvent(event)}

@@ -10,8 +10,6 @@ from watchdog.observers import Observer
 
 logger = logging.getLogger(__name__)
 
-PEER_CHECK_INTERVAL = 300  # 5 minutes
-
 
 class SessionWatcher(FileSystemEventHandler):
     """Watches Claude project dirs for JSONL changes and triggers packaging."""
@@ -28,7 +26,6 @@ class SessionWatcher(FileSystemEventHandler):
         self._timer: Optional[threading.Timer] = None
         self._observer: Optional[Observer] = None
         self._lock = threading.Lock()
-        self._peer_timer: Optional[threading.Timer] = None
 
     @property
     def is_running(self) -> bool:
@@ -63,54 +60,12 @@ class SessionWatcher(FileSystemEventHandler):
         except Exception:
             logger.exception("Packaging error during watch")
 
-    def _maybe_check_peers(self):
-        """Check for new team members periodically."""
-        try:
-            from karma.pending import accept_pending_folders
-            from karma.syncthing import SyncthingClient, read_local_api_key
-            from karma.config import SyncConfig
-            from karma.db import get_connection
-
-            config = SyncConfig.load()
-            if not config:
-                return 0
-            api_key = config.syncthing.api_key or read_local_api_key()
-            st = SyncthingClient(api_key=api_key)
-            if not st.is_running():
-                return 0
-
-            conn = get_connection()
-            try:
-                # auto_only=True: only process handshake + own outbox.
-                # Other people's outboxes require explicit user acceptance.
-                accepted = accept_pending_folders(st, config, conn, auto_only=True)
-                return accepted or 0
-            finally:
-                conn.close()
-        except Exception as e:
-            logger.debug("Peer check failed: %s", e)
-            return 0
-
-    def _schedule_peer_check(self):
-        """Schedule the next periodic peer check."""
-        self._peer_timer = threading.Timer(PEER_CHECK_INTERVAL, self._run_peer_check)
-        self._peer_timer.daemon = True
-        self._peer_timer.start()
-
-    def _run_peer_check(self):
-        """Run peer check and reschedule."""
-        self._maybe_check_peers()
-        if self._observer is not None and self._observer.is_alive():
-            self._schedule_peer_check()
-
     def start(self):
         """Start watching the directory."""
         self._observer = Observer()
         self._observer.schedule(self, str(self.watch_dir), recursive=True)
         self._observer.daemon = True
         self._observer.start()
-        # Start periodic peer discovery
-        self._schedule_peer_check()
 
     def stop(self):
         """Stop watching."""
@@ -118,9 +73,6 @@ class SessionWatcher(FileSystemEventHandler):
             if self._timer is not None:
                 self._timer.cancel()
                 self._timer = None
-        if self._peer_timer is not None:
-            self._peer_timer.cancel()
-            self._peer_timer = None
         if self._observer is not None:
             self._observer.stop()
             self._observer.join(timeout=5)

@@ -2055,10 +2055,7 @@ def set_session_title(uuid: str, request: SetTitleRequest):
             if user_id:
                 outbox_dir = settings.karma_base / "remote-sessions" / user_id / encoded_name
                 if outbox_dir.is_dir():
-                    cli_path = Path(__file__).parent.parent.parent / "cli"
-                    if str(cli_path) not in sys.path:
-                        sys.path.insert(0, str(cli_path))
-                    from karma.titles_io import write_title
+                    from services.titles_io import write_title
 
                     write_title(outbox_dir / "titles.json", uuid, title, "hook")
     except Exception as e:

@@ -79,8 +79,8 @@
 			if (itemType === 'skill' && result.inherited_name && result.status === 'created') {
 				await goto(`/skills/${encodeURIComponent(result.inherited_name)}`);
 			}
-		} catch (e: any) {
-			errorMsg = e.message ?? 'Network error';
+		} catch (e: unknown) {
+			errorMsg = e instanceof Error ? e.message : 'Network error';
 		} finally {
 			loading = false;
 		}

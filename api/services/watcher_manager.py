@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import sqlite3
-import sys
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,10 +21,6 @@ from watchdog.observers import Observer
 
 logger = logging.getLogger(__name__)
 
-# Add CLI to path
-_CLI_PATH = Path(__file__).parent.parent.parent / "cli"
-if str(_CLI_PATH) not in sys.path:
-    sys.path.insert(0, str(_CLI_PATH))
 
 
 class RemoteSessionWatcher(FileSystemEventHandler):
@@ -168,7 +163,7 @@ class ReconciliationTimer:
 
     def _reconcile(self):
         """Run ReconciliationService.run_cycle() with a dedicated connection."""
-        from karma.config import SyncConfig
+        from models.sync_config import SyncConfig
 
         config = SyncConfig.load()
         if config is None:
@@ -290,8 +285,8 @@ class WatcherManager:
                 f"Watcher already running for team(s) {self._teams!r}"
             )
 
-        from karma.watcher import SessionWatcher
-        from karma.worktree_discovery import find_worktree_dirs
+        from services.sync.session_watcher import SessionWatcher
+        from services.sync.worktree_discovery import find_worktree_dirs
 
         all_teams = config_data.get("teams", {})
         user_id = config_data.get("user_id", "unknown")

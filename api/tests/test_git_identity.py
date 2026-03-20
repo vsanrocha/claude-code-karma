@@ -8,11 +8,10 @@ import pytest
 import sys
 from pathlib import Path
 
-# Add CLI to path
-CLI_PATH = Path(__file__).parent.parent.parent / "cli"
-sys.path.insert(0, str(CLI_PATH))
+# Add API to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from karma.sync import detect_git_identity
+from utils.git import detect_git_identity
 
 
 def _mock_git_output(url: str):

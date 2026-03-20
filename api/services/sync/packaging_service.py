@@ -113,9 +113,9 @@ class PackagingService:
         same encoded_name are serialized (non-blocking — returns immediately
         if another thread is already packaging).
         """
-        from karma.packager import SessionPackager
-        from karma.worktree_discovery import find_worktree_dirs
-        from karma.config import KARMA_BASE
+        from services.sync.session_packager import SessionPackager
+        from services.sync.worktree_discovery import find_worktree_dirs
+        from models.sync_config import KARMA_BASE
         from services.syncthing.folder_manager import build_outbox_folder_id
 
         lock = _get_project_lock(encoded_name)

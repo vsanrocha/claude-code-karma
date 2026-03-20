@@ -9,8 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from karma.config import KARMA_BASE
-from karma.manifest import SessionEntry, SkillDefinitionEntry, SyncManifest
+from config import settings
+from models.sync_manifest import SessionEntry, SkillDefinitionEntry, SyncManifest
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ def _get_live_session_uuids() -> set[str]:
     without a SessionEnd hook) and are NOT excluded — their JSONL is stable
     enough to package.
     """
-    live_dir = KARMA_BASE / "live-sessions"
+    live_dir = settings.karma_base / "live-sessions"
     if not live_dir.is_dir():
         return set()
 
@@ -99,7 +99,7 @@ def get_session_limit(
     effective_limit = team_session_limit
     if team_name and member_tag:
         try:
-            meta_file = KARMA_BASE / "metadata-folders" / team_name / "members" / f"{member_tag}.json"
+            meta_file = settings.karma_base / "metadata-folders" / team_name / "members" / f"{member_tag}.json"
             if meta_file.exists():
                 state = json.loads(meta_file.read_text(encoding="utf-8"))
                 device_limit = state.get("session_limit")
@@ -183,9 +183,9 @@ def _build_titles_from_db(session_uuids: list[str]) -> dict[str, dict]:
         return {}
 
     try:
-        from karma.db import get_connection
+        from db.connection import create_writer_connection
 
-        conn = get_connection()
+        conn = create_writer_connection()
     except Exception:
         return {}
 
@@ -365,9 +365,9 @@ def _build_skill_classifications_from_db(
         return {}
 
     try:
-        from karma.db import get_connection
+        from db.connection import create_writer_connection
 
-        conn = get_connection()
+        conn = create_writer_connection()
     except Exception:
         return {}
 
@@ -375,7 +375,7 @@ def _build_skill_classifications_from_db(
     placeholders = ",".join("?" * len(session_uuids))
 
     try:
-        # Import classify_invocation from API (CLI adds API to sys.path via karma.db)
+        # Import classify_invocation from API (already on sys.path)
         try:
             from command_helpers import classify_invocation
             _classify = classify_invocation
@@ -708,7 +708,7 @@ class SessionPackager:
             logger.debug("Plan packaging failed (best-effort): %s", e)
 
         # Detect git identity for cross-machine project matching
-        from karma.sync import detect_git_identity
+        from utils.git import detect_git_identity
 
         git_id = detect_git_identity(self.project_path)
 
@@ -758,7 +758,7 @@ class SessionPackager:
 
         # Backfill titles.json from DB (merges with any existing hook-written titles)
         try:
-            from karma.titles_io import write_titles_bulk
+            from services.titles_io import write_titles_bulk
 
             titles_path = staging_dir / "titles.json"
             db_titles = _build_titles_from_db([entry.uuid for entry in sessions])

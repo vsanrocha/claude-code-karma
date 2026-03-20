@@ -52,11 +52,12 @@ def mock_project_svc():
 @pytest.fixture
 def client(conn, mock_config, mock_project_svc):
     from routers.sync_projects import router, get_project_svc
-    from routers.sync_deps import get_conn, require_config
+    from routers.sync_deps import get_conn, get_read_conn, require_config
 
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[get_conn] = lambda: conn
+    app.dependency_overrides[get_read_conn] = lambda: conn
     app.dependency_overrides[require_config] = lambda: mock_config
     app.dependency_overrides[get_project_svc] = lambda: mock_project_svc
     return TestClient(app)

@@ -10,7 +10,7 @@ import sqlite3
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 20
+SCHEMA_VERSION = 21
 
 SCHEMA_SQL = """
 -- Schema versioning
@@ -214,6 +214,7 @@ CREATE TABLE IF NOT EXISTS projects (
     project_path TEXT,
     slug TEXT,
     display_name TEXT,
+    git_identity TEXT,
     session_count INTEGER DEFAULT 0,
     last_activity TEXT,
     updated_at TEXT DEFAULT (datetime('now'))
@@ -300,6 +301,20 @@ CREATE INDEX IF NOT EXISTS idx_subs_project ON sync_subscriptions(project_git_id
 CREATE INDEX IF NOT EXISTS idx_events_type ON sync_events(event_type);
 CREATE INDEX IF NOT EXISTS idx_events_team ON sync_events(team_name);
 CREATE INDEX IF NOT EXISTS idx_events_time ON sync_events(created_at);
+
+-- Skill definitions (custom skills, user commands, remote plugin skills)
+CREATE TABLE IF NOT EXISTS skill_definitions (
+    skill_name TEXT NOT NULL,
+    source_user_id TEXT NOT NULL DEFAULT '__local__',
+    source_machine_id TEXT,
+    category TEXT,
+    content TEXT,
+    base_directory TEXT,
+    description TEXT,
+    extracted_from_session TEXT,
+    updated_at TEXT,
+    PRIMARY KEY (skill_name, source_user_id)
+);
 """
 
 
@@ -633,6 +648,29 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
                       WHERE m.user_id = sessions.remote_user_id
                   )
             """)
+
+        if current_version < 21:
+            logger.info(
+                "Migrating → v21: adding skill_definitions table and projects.git_identity column"
+            )
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS skill_definitions (
+                    skill_name TEXT NOT NULL,
+                    source_user_id TEXT NOT NULL DEFAULT '__local__',
+                    source_machine_id TEXT,
+                    category TEXT,
+                    content TEXT,
+                    base_directory TEXT,
+                    description TEXT,
+                    extracted_from_session TEXT,
+                    updated_at TEXT,
+                    PRIMARY KEY (skill_name, source_user_id)
+                );
+            """)
+            try:
+                conn.execute("ALTER TABLE projects ADD COLUMN git_identity TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
 
     # Record version
     conn.execute(

@@ -46,11 +46,12 @@ def mock_recon_svc():
 @pytest.fixture
 def client(conn, mock_config, mock_recon_svc):
     from routers.sync_system import router, get_recon_svc
-    from routers.sync_deps import get_conn, get_optional_config, require_config
+    from routers.sync_deps import get_conn, get_read_conn, get_optional_config, require_config
 
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[get_conn] = lambda: conn
+    app.dependency_overrides[get_read_conn] = lambda: conn
     app.dependency_overrides[get_optional_config] = lambda: mock_config
     app.dependency_overrides[require_config] = lambda: mock_config
     app.dependency_overrides[get_recon_svc] = lambda: mock_recon_svc
@@ -76,11 +77,12 @@ class TestStatus:
 
     def test_not_configured(self, conn):
         from routers.sync_system import router
-        from routers.sync_deps import get_conn, get_optional_config
+        from routers.sync_deps import get_conn, get_read_conn, get_optional_config
 
         app = FastAPI()
         app.include_router(router)
         app.dependency_overrides[get_conn] = lambda: conn
+        app.dependency_overrides[get_read_conn] = lambda: conn
         app.dependency_overrides[get_optional_config] = lambda: None
 
         c = TestClient(app)

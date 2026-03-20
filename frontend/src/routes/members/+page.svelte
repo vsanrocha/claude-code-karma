@@ -15,7 +15,7 @@
 
 	let search = $state('');
 
-	let filteredMembers = $derived(() => {
+	let filteredMembers = $derived.by(() => {
 		if (!search.trim()) return data.members;
 		const q = search.toLowerCase().trim();
 		return data.members.filter(
@@ -135,7 +135,7 @@
 		{/if}
 	</div>
 
-	{#if search && filteredMembers().length === 0}
+	{#if search && filteredMembers.length === 0}
 		<div class="text-center py-12 text-[var(--text-muted)]">
 			<Search size={32} class="mx-auto mb-2 opacity-40" />
 			<p class="text-sm">No members matching "{search}"</p>
@@ -144,7 +144,7 @@
 
 	<!-- Members Grid -->
 	<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" use:listNavigation>
-		{#each filteredMembers() as member (member.member_tag)}
+		{#each filteredMembers as member (member.member_tag)}
 			{@const colors = getTeamMemberColor(member.name)}
 			{@const hexColor = getTeamMemberHexColor(member.name)}
 			<a

@@ -14,6 +14,7 @@ from domain.team import AuthorizationError, InvalidTransitionError
 from routers.sync_deps import (
     get_conn,
     get_optional_config,
+    get_read_conn,
     make_repos,
     make_team_service,
     require_config,
@@ -72,7 +73,7 @@ async def create_team(
 
 
 @router.get("/teams")
-async def list_teams(conn: sqlite3.Connection = Depends(get_conn)):
+async def list_teams(conn: sqlite3.Connection = Depends(get_read_conn)):
     """List all teams with member/project counts."""
     repos = make_repos()
     teams = repos["teams"].list_all(conn)
@@ -99,7 +100,7 @@ async def list_teams(conn: sqlite3.Connection = Depends(get_conn)):
 
 
 @router.get("/teams/{name}")
-async def get_team(name: str, conn: sqlite3.Connection = Depends(get_conn)):
+async def get_team(name: str, conn: sqlite3.Connection = Depends(get_read_conn)):
     """Team detail with members, projects, and subscriptions."""
     repos = make_repos()
     team = repos["teams"].get(conn, name)
@@ -229,7 +230,7 @@ async def remove_member(
 
 
 @router.get("/teams/{name}/members")
-async def list_members(name: str, conn: sqlite3.Connection = Depends(get_conn)):
+async def list_members(name: str, conn: sqlite3.Connection = Depends(get_read_conn)):
     """List team members."""
     repos = make_repos()
     team = repos["teams"].get(conn, name)
@@ -244,7 +245,7 @@ async def list_members(name: str, conn: sqlite3.Connection = Depends(get_conn)):
 @router.get("/teams/{name}/join-code")
 async def get_join_code(
     name: str,
-    conn: sqlite3.Connection = Depends(get_conn),
+    conn: sqlite3.Connection = Depends(get_read_conn),
     config=Depends(require_config),
     pairing=Depends(get_pairing_svc),
 ):
@@ -266,7 +267,7 @@ async def get_join_code(
 async def get_team_activity(
     name: str,
     limit: int = Query(default=20, ge=1, le=200),
-    conn: sqlite3.Connection = Depends(get_conn),
+    conn: sqlite3.Connection = Depends(get_read_conn),
 ):
     """Return recent activity events for a team."""
     repos = make_repos()
@@ -293,7 +294,7 @@ async def get_team_activity(
 @router.get("/teams/{name}/project-status")
 async def get_project_status(
     name: str,
-    conn: sqlite3.Connection = Depends(get_conn),
+    conn: sqlite3.Connection = Depends(get_read_conn),
     config=Depends(get_optional_config),
 ):
     """Per-project sync status: subscriptions, session counts, sync gap."""
@@ -379,7 +380,7 @@ async def get_project_status(
 async def get_session_stats(
     name: str,
     days: int = Query(default=30, ge=1, le=365),
-    conn: sqlite3.Connection = Depends(get_conn),
+    conn: sqlite3.Connection = Depends(get_read_conn),
 ):
     """Per-member stats for a team: status and subscription count."""
     repos = make_repos()
@@ -482,7 +483,7 @@ def _get_active_counts(live_sessions_dir: Path | None = None) -> dict[str, int]:
     Uses worktree-to-parent resolution so worktree sessions roll up to
     the real project.
     """
-    from karma.packager import STALE_LIVE_SESSION_SECONDS
+    from services.sync.session_packager import STALE_LIVE_SESSION_SECONDS
 
     if live_sessions_dir is None:
         from config import settings as app_settings

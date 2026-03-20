@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { FolderGit2, ArrowUp, ArrowDown, CheckCircle2, Loader2, Users, RotateCcw, Clock, RefreshCw, ChevronDown, Copy, CheckCircle, Monitor, Fingerprint } from 'lucide-svelte';
+	import { FolderGit2, ArrowUp, ArrowDown, CheckCircle2, Loader2, Users, RotateCcw, Clock, RefreshCw, ChevronDown, Copy, CheckCircle, Monitor } from 'lucide-svelte';
 	import type { SyncDetect, SyncStatusResponse, SyncProjectStatus, SyncEvent } from '$lib/api-types';
 	import { formatRelativeTime, copyToClipboard } from '$lib/utils';
+	import PairingCodeCard from '$lib/components/shared/PairingCodeCard.svelte';
 	import { formatSyncEvent } from '$lib/utils/sync-events';
 	import { API_BASE } from '$lib/config';
 
@@ -30,7 +31,7 @@
 		if (!teamName || !status?.teams) return 0;
 		const teamsArr = Array.isArray(status.teams) ? status.teams : [];
 		const team = teamsArr.find((t: { name: string }) => t.name === teamName) as { member_count?: number; members?: unknown[] } | undefined;
-		const total = team?.member_count ?? (team?.members as any[])?.length ?? 0;
+		const total = team?.member_count ?? (team?.members as unknown[])?.length ?? 0;
 		return Math.max(0, total - 1); // exclude self
 	});
 
@@ -46,7 +47,7 @@
 	let sessionsSharedCount = $derived.by(() => {
 		let shared = 0;
 		for (const p of projectStatuses) {
-			shared += (p as { packaged_count?: number }).packaged_count ?? 0;
+			shared += p.packaged_count ?? 0;
 		}
 		return shared;
 	});
@@ -54,7 +55,7 @@
 	let sessionsReceivedCount = $derived.by(() => {
 		let received = 0;
 		for (const p of projectStatuses) {
-			const counts = (p as { received_counts?: Record<string, number> }).received_counts ?? {};
+			const counts = p.received_counts ?? {};
 			for (const count of Object.values(counts)) {
 				received += count ?? 0;
 			}
@@ -63,7 +64,7 @@
 	});
 
 	let totalUnsynced = $derived(
-		projectStatuses.reduce((sum, p) => sum + ((p as { gap?: number }).gap ?? 0), 0)
+		projectStatuses.reduce((sum, p) => sum + (p.gap ?? 0), 0)
 	);
 
 	async function loadMemberStats() {
@@ -144,36 +145,6 @@
 		}
 	}
 
-	// ── Pairing Code (v4) ──────────────────────────────────────────────────
-	let pairingCode = $state<string | null>(null);
-	let pairingMemberTag = $state<string | null>(null);
-	let pairingLoading = $state(true);
-	let copiedPairing = $state(false);
-
-	async function loadPairingCode() {
-		try {
-			const res = await fetch(`${API_BASE}/sync/pairing/code`);
-			if (res.ok) {
-				const data = await res.json();
-				pairingCode = data.code;
-				pairingMemberTag = data.member_tag ?? null;
-			}
-		} catch {
-			/* non-critical */
-		} finally {
-			pairingLoading = false;
-		}
-	}
-
-	async function copyPairingCode() {
-		if (!pairingCode) return;
-		const ok = await copyToClipboard(pairingCode);
-		if (ok) {
-			copiedPairing = true;
-			setTimeout(() => (copiedPairing = false), 2000);
-		}
-	}
-
 	// ── Machine Details accordion ───────────────────────────────────────────
 	let machineDetailsOpen = $state(false);
 	let copiedDeviceId = $state(false);
@@ -236,7 +207,6 @@
 			loadMemberStats();
 			loadProjectStatus();
 			loadRecentActivity();
-			loadPairingCode();
 		});
 	});
 </script>
@@ -282,50 +252,7 @@
 	</div>
 
 	<!-- ── 1b. Your Pairing Code ─────────────────────────────────────────── -->
-	<div class="rounded-[var(--radius-lg)] border border-[var(--accent)]/30 bg-[var(--bg-subtle)]">
-		<div class="px-5 py-4">
-			<div class="flex items-center gap-2 mb-1">
-				<Fingerprint size={16} class="text-[var(--accent)]" />
-				<h3 class="text-sm font-semibold text-[var(--text-primary)]">Your Pairing Code</h3>
-			</div>
-			<p class="text-xs text-[var(--text-muted)] mb-3">Share this with a team leader so they can add you to their team</p>
-
-			{#if pairingLoading}
-				<div class="flex items-center gap-2 px-4 py-3 rounded-[var(--radius-md)] bg-[var(--bg-muted)] border border-[var(--border)]">
-					<Loader2 size={14} class="animate-spin text-[var(--text-muted)]" />
-					<span class="text-xs text-[var(--text-muted)]">Loading pairing code...</span>
-				</div>
-			{:else if pairingCode}
-				<div class="flex items-center gap-2">
-					<code
-						class="flex-1 px-4 py-3 text-base font-mono font-semibold tracking-wider rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--bg-muted)] text-[var(--text-primary)] select-all leading-relaxed"
-					>
-						{pairingCode}
-					</code>
-					<button
-						onclick={copyPairingCode}
-						aria-label="Copy pairing code"
-						class="shrink-0 p-3 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-muted)] hover:text-[var(--accent)] hover:border-[var(--accent)]/40 hover:bg-[var(--accent)]/5 transition-colors"
-					>
-						{#if copiedPairing}
-							<CheckCircle size={16} class="text-[var(--success)]" />
-						{:else}
-							<Copy size={16} />
-						{/if}
-					</button>
-				</div>
-				{#if pairingMemberTag}
-					<p class="text-[11px] text-[var(--text-muted)] mt-2.5">
-						Your identity: <span class="font-mono text-[var(--text-secondary)]">{pairingMemberTag}</span>
-					</p>
-				{/if}
-			{:else}
-				<div class="px-4 py-3 rounded-[var(--radius-md)] bg-[var(--bg-muted)] border border-[var(--border)]">
-					<p class="text-xs text-[var(--text-muted)]">Pairing code unavailable. Make sure sync is configured.</p>
-				</div>
-			{/if}
-		</div>
-	</div>
+	<PairingCodeCard variant="card" />
 
 	<!-- ── 2. Stats Row ──────────────────────────────────────────────────── -->
 	{#if membersLoading && projectStatusLoading}

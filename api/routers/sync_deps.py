@@ -8,16 +8,11 @@ from __future__ import annotations
 
 import re
 import sqlite3
-import sys
 from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
 
-# Ensure CLI module is importable (for karma.config)
-_CLI_PATH = Path(__file__).resolve().parent.parent.parent / "cli"
-if str(_CLI_PATH) not in sys.path:
-    sys.path.insert(0, str(_CLI_PATH))
 
 # Simple name validation (replaces sync_identity.validate_user_id)
 _VALID_NAME = re.compile(r"^[a-zA-Z0-9_-]+$")
@@ -43,9 +38,16 @@ def get_conn() -> sqlite3.Connection:
     return get_writer_db()
 
 
+def get_read_conn() -> sqlite3.Connection:
+    """Read-only connection for sync GET endpoints."""
+    from db.connection import create_read_connection
+
+    return create_read_connection()
+
+
 async def require_config() -> Any:
     """Load SyncConfig from disk.  HTTPException 400 if not initialized."""
-    from karma.config import SyncConfig
+    from models.sync_config import SyncConfig
 
     config = SyncConfig.load()
     if config is None:
@@ -55,7 +57,7 @@ async def require_config() -> Any:
 
 async def get_optional_config() -> Any:
     """Load SyncConfig, returning None if not initialized (no error)."""
-    from karma.config import SyncConfig
+    from models.sync_config import SyncConfig
 
     return SyncConfig.load()
 
