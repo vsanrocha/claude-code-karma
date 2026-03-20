@@ -23,6 +23,22 @@ class MemberRepository:
         ).fetchall()
         return [self._row_to_member(r) for r in rows]
 
+    def get_all_by_member_tag(
+        self, conn: sqlite3.Connection, member_tag: str
+    ) -> list[Member]:
+        rows = conn.execute(
+            "SELECT * FROM sync_members WHERE member_tag = ?", (member_tag,)
+        ).fetchall()
+        return [self._row_to_member(r) for r in rows]
+
+    def get_by_user_id(
+        self, conn: sqlite3.Connection, user_id: str
+    ) -> list[Member]:
+        rows = conn.execute(
+            "SELECT * FROM sync_members WHERE user_id = ?", (user_id,)
+        ).fetchall()
+        return [self._row_to_member(r) for r in rows]
+
     def save(self, conn: sqlite3.Connection, member: Member) -> None:
         conn.execute(
             """INSERT INTO sync_members

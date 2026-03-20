@@ -92,6 +92,34 @@ class TestMemberRepoListForTeam:
         assert repo.list_for_team(conn_with_team, "nosuchteam") == []
 
 
+class TestMemberRepoGetAllByMemberTag:
+    def test_returns_members_across_teams(self, conn, repo):
+        TeamRepository().save(conn, Team(name="t1", leader_device_id="D1", leader_member_tag="jay.mac"))
+        TeamRepository().save(conn, Team(name="t2", leader_device_id="D1", leader_member_tag="jay.mac"))
+        m1 = Member(team_name="t1", member_tag="jay.mac", device_id="D1", user_id="jay", machine_tag="mac")
+        m2 = Member(team_name="t2", member_tag="jay.mac", device_id="D1", user_id="jay", machine_tag="mac")
+        repo.save(conn, m1)
+        repo.save(conn, m2)
+        results = repo.get_all_by_member_tag(conn, "jay.mac")
+        assert len(results) == 2
+        assert {r.team_name for r in results} == {"t1", "t2"}
+
+    def test_returns_empty_for_unknown_tag(self, conn, repo):
+        assert repo.get_all_by_member_tag(conn, "nobody.nope") == []
+
+
+class TestMemberRepoGetByUserId:
+    def test_returns_members_by_user_id(self, conn, repo):
+        TeamRepository().save(conn, Team(name="t1", leader_device_id="D1", leader_member_tag="jay.mac"))
+        repo.save(conn, Member(team_name="t1", member_tag="jay.mac", device_id="D1", user_id="jay", machine_tag="mac"))
+        results = repo.get_by_user_id(conn, "jay")
+        assert len(results) == 1
+        assert results[0].member_tag == "jay.mac"
+
+    def test_returns_empty_for_unknown_user(self, conn, repo):
+        assert repo.get_by_user_id(conn, "nobody") == []
+
+
 class TestMemberRepoRemoval:
     def test_was_removed_false_initially(self, conn_with_team, repo):
         assert repo.was_removed(conn_with_team, "t", "DEV-X") is False
