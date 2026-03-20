@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Set
 from command_helpers import category_from_base_directory, classify_invocation, is_command_category, is_skill_category
 from config import FILE_TOOL_MAPPINGS
 from models import AssistantMessage, Session, ToolUseBlock, UserMessage
+from utils import extract_prompt_from_content
 from models.conversation import ConversationEntity
 from utils import FileOperation, extract_file_operation, normalize_key
 
@@ -199,9 +200,12 @@ def _collect_conversation_data_core(
                 content = msg.content or ""
                 # Skip tool result and internal messages
                 if not msg.is_tool_result and not msg.is_internal_message:
-                    data.initial_prompt = content[:5000] if content else None
-                    if msg.image_attachments:
-                        data.initial_prompt_images = list(msg.image_attachments)
+                    prompt = extract_prompt_from_content(content) if content else None
+                    # Skip empty prompts (e.g., bare command invocations without args)
+                    if prompt:
+                        data.initial_prompt = prompt[:5000]
+                        if msg.image_attachments:
+                            data.initial_prompt_images = list(msg.image_attachments)
 
             # If we had a pending Skill invocation, check if this message carries
             # the base directory line injected by Claude Code.
@@ -279,8 +283,10 @@ def collect_agent_data(agent: ConversationEntity) -> ConversationData:
     if data.initial_prompt is None:
         for msg in agent.iter_messages():
             if isinstance(msg, UserMessage) and msg.content:
-                data.initial_prompt = msg.content[:5000]
-                break
+                prompt = extract_prompt_from_content(msg.content)
+                if prompt:
+                    data.initial_prompt = prompt[:5000]
+                    break
 
     return data
 
@@ -331,9 +337,12 @@ def collect_session_data(session: Session, include_subagents: bool = False) -> S
                 content = msg.content or ""
                 # Skip tool result messages
                 if not (content.strip().startswith("{") and "'tool_use_id':" in content):
-                    data.initial_prompt = content[:5000] if content else None
-                    if msg.image_attachments:
-                        data.initial_prompt_images = list(msg.image_attachments)
+                    prompt = extract_prompt_from_content(content) if content else None
+                    # Skip empty prompts (e.g., bare command invocations without args)
+                    if prompt:
+                        data.initial_prompt = prompt[:5000]
+                        if msg.image_attachments:
+                            data.initial_prompt_images = list(msg.image_attachments)
 
         # Assistant message processing
         elif isinstance(msg, AssistantMessage):
