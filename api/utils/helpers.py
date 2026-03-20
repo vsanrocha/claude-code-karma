@@ -375,6 +375,10 @@ def get_initial_prompt(session: "Session", max_length: Optional[int] = None) -> 
             # Extract actual prompt from command-wrapped content
             prompt = extract_prompt_from_content(msg.content)
 
+            # Skip empty prompts (e.g., bare command invocations without args)
+            if not prompt:
+                continue
+
             if max_length is not None:
                 return prompt[:max_length]
             return prompt
