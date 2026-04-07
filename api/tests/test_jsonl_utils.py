@@ -188,6 +188,51 @@ class TestMessageMerging:
         # The [Image: source:...] fallback text must be absent
         assert not any("[Image: source:" in t for t in texts_in_result)
 
+    def test_merge_drops_image_hash_number_marker(self) -> None:
+        """
+        Merged result drops the v2.1.83+ ``[Image #N]`` marker (including the
+        v2.1.85+ trailing-space variant).  Regression guard for the format
+        change Claude Code introduced after our initial merge logic shipped.
+        """
+        base = {
+            "type": "user",
+            "uuid": "u1",
+            "timestamp": "2026-01-08T13:00:00.000Z",
+            "message": {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "explain this screenshot"},
+                    {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "abc"}},
+                    {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "def"}},
+                ],
+            },
+        }
+        extra = {
+            "type": "user",
+            "uuid": "u2",
+            "timestamp": "2026-01-08T13:00:00.000Z",
+            "message": {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "[Image #1]"},
+                    {"type": "text", "text": "[Image #2] "},  # v2.1.85+ trailing-space variant
+                ],
+            },
+        }
+
+        result = _merge_user_message_dicts(base, extra)
+        content = result["message"]["content"]
+
+        types_in_result = [p.get("type") for p in content]
+        texts_in_result = [p.get("text", "") for p in content if p.get("type") == "text"]
+
+        # Both image blocks preserved from base
+        assert types_in_result.count("image") == 2
+        # Real text from base preserved
+        assert "explain this screenshot" in texts_in_result
+        # Both [Image #N] markers dropped (with and without trailing space)
+        assert not any(t.startswith("[Image #") for t in texts_in_result)
+
     def test_merge_preserves_real_extra_text(self) -> None:
         """Real text in the extra message is preserved alongside base content."""
         base = {
