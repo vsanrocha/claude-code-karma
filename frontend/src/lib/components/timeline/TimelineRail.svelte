@@ -8,6 +8,7 @@
 	import { createTimelineLogic } from '$lib/utils/timelineLogic.svelte';
 	import { formatDate } from '$lib/utils';
 	import TimelineFilterBar from './TimelineFilterBar.svelte';
+	import TimelineOverviewBar from './TimelineOverviewBar.svelte';
 	import TimelineEventCard from './TimelineEventCard.svelte';
 	import TimelineGap from './TimelineGap.svelte';
 	import Modal from '$lib/components/ui/Modal.svelte';
@@ -128,6 +129,12 @@
 
 	// Pre-compute visible events (excluding gaps) for correct indexing
 	const visibleEvents = $derived(timeline.viewItems.filter((i) => !('type' in i)));
+
+	// Set of event IDs that pass the current filter (for the overview bar)
+	const matchingEventIds = $derived.by<Set<string>>(() => {
+		if (!timeline.hasActiveFilter) return new Set<string>();
+		return new Set(events.filter((e) => timeline.matchesFilters(e)).map((e) => e.id));
+	});
 
 	// Navigable events: visible events that have expandable/popup content
 	function isExpandable(event: TimelineEvent): boolean {
@@ -313,6 +320,13 @@
 			searchQuery={timeline.searchQuery}
 			onSearchChange={timeline.setSearchQuery}
 			class="mb-6 sticky top-14 z-20"
+		/>
+
+		<!-- Timeline Overview Bar -->
+		<TimelineOverviewBar
+			{events}
+			{matchingEventIds}
+			hasActiveFilter={timeline.hasActiveFilter}
 		/>
 
 		<!-- Timeline -->
