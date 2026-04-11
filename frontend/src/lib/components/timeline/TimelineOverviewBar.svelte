@@ -121,7 +121,7 @@
 		transition: opacity 200ms ease;
 		cursor: pointer;
 		background-color: var(--segment-color);
-		opacity: 0.4;
+		opacity: 0.6;
 	}
 
 	.segment.filtered {
