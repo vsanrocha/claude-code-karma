@@ -77,7 +77,9 @@
 			{#each events as event (event.id)}
 				<div
 					class="segment"
-					style="background-color: {segmentColor(event)}; opacity: {segmentOpacity(event)};"
+					role="button"
+					tabindex="0"
+					style="--segment-color: {segmentColor(event)}; opacity: {segmentOpacity(event)};"
 					onmouseenter={(e) => handleMouseEnter(event, e)}
 					onmouseleave={handleMouseLeave}
 				></div>
@@ -122,11 +124,12 @@
 		min-width: 1px;
 		transition: opacity 200ms ease;
 		cursor: pointer;
+		background-color: var(--segment-color);
+		opacity: 0.4;
 	}
 
 	.segment:hover {
-		opacity: 1 !important;
-		filter: brightness(1.2);
+		opacity: 0.8 !important;
 	}
 
 	.tooltip {
