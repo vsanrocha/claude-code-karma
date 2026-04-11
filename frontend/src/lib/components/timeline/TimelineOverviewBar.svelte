@@ -48,11 +48,6 @@
 		return colorVar[event.event_type] ?? 'var(--text-muted)';
 	}
 
-	function segmentOpacity(event: TimelineEvent): number {
-		if (!hasActiveFilter) return 1;
-		return matchingEventIds.has(event.id) ? 1 : 0;
-	}
-
 	function handleMouseEnter(event: TimelineEvent, e: MouseEvent) {
 		hoveredEventId = event.id;
 		const rect = (e.target as HTMLElement).getBoundingClientRect();
@@ -77,9 +72,10 @@
 			{#each events as event (event.id)}
 				<div
 					class="segment"
+					class:filtered={hasActiveFilter && !matchingEventIds.has(event.id)}
 					role="button"
 					tabindex="0"
-					style="--segment-color: {segmentColor(event)}; opacity: {segmentOpacity(event)};"
+					style="--segment-color: {segmentColor(event)};"
 					onmouseenter={(e) => handleMouseEnter(event, e)}
 					onmouseleave={handleMouseLeave}
 				></div>
@@ -128,8 +124,16 @@
 		opacity: 0.4;
 	}
 
+	.segment.filtered {
+		opacity: 0;
+	}
+
 	.segment:hover {
-		opacity: 0.8 !important;
+		opacity: 0.8;
+	}
+
+	.segment.filtered:hover {
+		opacity: 0;
 	}
 
 	.tooltip {
