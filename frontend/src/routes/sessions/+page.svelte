@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
-	import { replaceState } from '$app/navigation';
+	import { replaceState, beforeNavigate } from '$app/navigation';
 	import { navigating } from '$app/stores';
 	import { onMount, onDestroy, tick } from 'svelte';
 	import {
@@ -65,11 +65,9 @@
 		hasActiveFilters as checkHasActiveFilters,
 		filterSessionsByStatus,
 		filterSessionsByDateRange,
-		createLiveSessionLookup,
 		calculateLiveStatusCounts,
 		createHistoricalSessionLookup,
-		shouldShowEndedStatus,
-		type LiveSessionLookupFn
+		shouldShowEndedStatus
 	} from '$lib/search';
 	import { getProjectNameFromEncoded } from '$lib/utils';
 
@@ -150,16 +148,6 @@
 			return true;
 		})
 	);
-
-	// Unified live session lookup using shared utility (slug-first strategy)
-	const getLiveSessionFn: LiveSessionLookupFn = $derived(
-		createLiveSessionLookup(data.liveSessions)
-	);
-
-	// Wrapper function for components that need function reference
-	function getLiveSession(session: SessionWithContext): LiveSessionSummary | null {
-		return getLiveSessionFn(session);
-	}
 
 	// Unified historical session lookup using shared utility
 	const getHistoricalSessionFn = $derived(createHistoricalSessionLookup(data.sessions));
@@ -336,7 +324,8 @@
 			filters: currentFilters,
 			branches: selectedBranchFilters,
 			project: selectedProject || undefined,
-			projectSlug: selectedProject ? getProjectSlug(selectedProject) : undefined
+			projectSlug: selectedProject ? getProjectSlug(selectedProject) : undefined,
+			page: data.filters.page
 		});
 
 		// Single replaceState call for all URL state (tick ensures reactive updates settled)
@@ -542,6 +531,29 @@
 		}
 	});
 
+	// Scroll save/restore + page restore + last-opened highlight
+	// Page must be saved to sessionStorage because reloadSessions() bypasses SvelteKit
+	// navigation — SvelteKit caches the original server data (page 1) in history state,
+	// so replaceState(?page=3) in the URL has no effect on the restored data.
+	const SCROLL_KEY = 'sessions_scroll';
+	const LAST_OPENED_KEY = 'sessions_last_opened';
+	const PAGE_KEY = 'sessions_page';
+	let lastOpenedSessionId = $state<string | null>(null);
+
+	beforeNavigate(({ to }) => {
+		if (!browser) return;
+		if (to?.route.id === '/projects/[project_slug]/[session_slug]') {
+			sessionStorage.setItem(SCROLL_KEY, String(window.scrollY));
+			sessionStorage.setItem(PAGE_KEY, String(data.filters.page));
+			const id = to.url.pathname.split('/').pop() ?? '';
+			if (id) sessionStorage.setItem(LAST_OPENED_KEY, id);
+		} else {
+			sessionStorage.removeItem(SCROLL_KEY);
+			sessionStorage.removeItem(LAST_OPENED_KEY);
+			sessionStorage.removeItem(PAGE_KEY);
+		}
+	});
+
 	// 30-second polling for historical sessions
 	let historicalPollInterval: ReturnType<typeof setInterval> | null = null;
 	let unregisterCtrlK: (() => void) | undefined;
@@ -586,6 +598,36 @@
 			}
 		}, 30000);
 
+		// Restore page + scroll + highlight when returning from a session detail.
+		// Page must be restored via reloadSessions() (not from URL) because SvelteKit
+		// caches the original server data in history state — the URL ?page=3 is ignored.
+		// Scroll restore is deferred until after page data loads so it lands on the right content.
+		const savedPage = sessionStorage.getItem(PAGE_KEY);
+		const savedScroll = sessionStorage.getItem(SCROLL_KEY);
+		const savedId = sessionStorage.getItem(LAST_OPENED_KEY);
+
+		if (savedPage !== null) sessionStorage.removeItem(PAGE_KEY);
+		if (savedScroll !== null) sessionStorage.removeItem(SCROLL_KEY);
+		if (savedId) {
+			sessionStorage.removeItem(LAST_OPENED_KEY);
+			lastOpenedSessionId = savedId;
+			setTimeout(() => { lastOpenedSessionId = null; }, 2000);
+		}
+
+		const restoreScroll = async () => {
+			if (savedScroll !== null) {
+				await tick();
+				requestAnimationFrame(() => window.scrollTo({ top: Number(savedScroll), behavior: 'instant' }));
+			}
+		};
+
+		if (savedPage !== null && Number(savedPage) > 1) {
+			// Reload the correct page first, then restore scroll position
+			reloadSessions({ page: Number(savedPage) }).then(restoreScroll);
+		} else {
+			restoreScroll();
+		}
+
 		return () => window.removeEventListener('popstate', handlePopState);
 	});
 
@@ -623,6 +665,14 @@
 			localStorage.setItem('claude-code-karma-sessions-view-mode', viewMode);
 		}
 	});
+
+	// Derived grid helpers (avoid duplicating class strings)
+	const isGrid = $derived(viewMode === 'grid');
+	const gridClass = $derived(
+		isGrid
+			? 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2'
+			: 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3'
+	);
 
 	// Dropdown state
 	let showProjectDropdown = $state(false);
@@ -1315,13 +1365,9 @@
 			</div>
 
 			<!-- Recently Ended Cards Grid - respects view mode -->
-			<div
-				class={viewMode === 'grid'
-					? 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2'
-					: 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3'}
-			>
+			<div class={gridClass}>
 				{#each recentlyEndedSessions as { session, liveSession } (session.uuid)}
-					<GlobalSessionCard {session} {liveSession} compact={viewMode === 'grid'} />
+					<GlobalSessionCard {session} {liveSession} compact={isGrid} highlighted={session.uuid.slice(0, 8) === lastOpenedSessionId} />
 				{/each}
 			</div>
 		</div>
@@ -1336,9 +1382,9 @@
 					<div class="h-4 w-16 skeleton-shimmer rounded"></div>
 					<div class="h-3 w-8 skeleton-shimmer rounded"></div>
 				</div>
-				<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+				<div class={gridClass}>
 					{#each Array(6) as _}
-						<SkeletonGlobalSessionCard />
+						<SkeletonGlobalSessionCard compact={isGrid} />
 					{/each}
 				</div>
 			</div>
@@ -1405,7 +1451,7 @@
 					<!-- Session Cards Grid -->
 					<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
 						{#each group.sessions as session (session.uuid)}
-							<GlobalSessionCard {session} liveSession={getLiveSession(session)} />
+							<GlobalSessionCard {session} highlighted={session.uuid.slice(0, 8) === lastOpenedSessionId} />
 						{/each}
 					</div>
 				</div>
@@ -1444,7 +1490,7 @@
 							<GlobalSessionCard
 								{session}
 								compact
-								liveSession={getLiveSession(session)}
+								highlighted={session.uuid.slice(0, 8) === lastOpenedSessionId}
 							/>
 						{/each}
 					</div>

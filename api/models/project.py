@@ -6,6 +6,7 @@ Projects are stored in ~/.claude/projects/ with path-encoded directory names.
 
 from __future__ import annotations
 
+import re
 from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional, Union
@@ -62,6 +63,25 @@ if TYPE_CHECKING:
 PathLike = Union[str, Path]
 
 
+def _is_absolute_path(path: str) -> bool:
+    """Check if a path is absolute, recognizing both Unix and Windows formats.
+
+    Unlike Path.is_absolute(), this works cross-platform: a Windows path like
+    'C:\\Users\\test' is recognized as absolute even when running on macOS/Linux.
+    This is important for reading session data synced from other operating systems.
+    """
+    # Unix absolute path
+    if path.startswith("/"):
+        return True
+    # Windows absolute path: drive letter followed by colon and separator
+    if re.match(r"^[A-Za-z]:[/\\]", path):
+        return True
+    # Windows UNC path
+    if path.startswith("\\\\") or path.startswith("//"):
+        return True
+    return False
+
+
 class Project(BaseModel):
     """
     Represents a Claude Code project directory under ~/.claude/projects/.
@@ -89,23 +109,34 @@ class Project(BaseModel):
         """
         Encode a project path to Claude's directory name format.
 
+        Unix:    /Users/me/repo  -> -Users-me-repo   (leading / -> leading -)
+        Windows: C:\\Code\\Tools -> C--Code-Tools     (colon -> dash, backslash -> dash)
+
         Args:
             path: Absolute project path
 
         Returns:
-            Encoded directory name (e.g., -Users-me-repo)
+            Encoded directory name (e.g., -Users-me-repo or C--Code-Tools)
         """
         p = str(path)
-        # Claude's encoding: replace '/' with '-' (leading '/' becomes leading '-')
+        # Normalise Windows backslashes
         p = p.replace("\\", "/")
         if p.startswith("/"):
+            # Unix absolute path: strip leading slash, prepend dash
             p = p[1:]
-        return "-" + p.replace("/", "-")
+            return "-" + p.replace("/", "-")
+        else:
+            # Windows absolute path like C:/Code/Tools
+            # Claude Code encodes colon and slash both as dash -> C--Code-Tools
+            return p.replace(":", "-").replace("/", "-")
 
     @staticmethod
     def decode_path(encoded: str) -> str:
         """
         Decode a Claude directory name back to original path.
+
+        Unix:    -Users-me-repo  -> /Users/me/repo
+        Windows: C--Code-Tools   -> C:/Code/Tools
 
         Note: This is lossy if the original path contained '-' characters.
         Use _extract_real_path_from_sessions() for accurate path recovery.
@@ -116,10 +147,20 @@ class Project(BaseModel):
         Returns:
             Decoded absolute path (may be incorrect if original had dashes)
         """
-        e = encoded
-        if e.startswith("-"):
-            e = e[1:]
-        return "/" + e.replace("-", "/")
+        if encoded.startswith("-"):
+            # Unix encoded path: -Users-me-repo -> /Users/me/repo
+            return "/" + encoded[1:].replace("-", "/")
+
+        # Windows encoded path: C--Code-Tools -> C:/Code/Tools
+        # Pattern: single drive letter followed by --
+        win_match = re.match(r"^([A-Za-z])--(.*)", encoded)
+        if win_match:
+            drive = win_match.group(1).upper()
+            rest = win_match.group(2).replace("-", "/")
+            return f"{drive}:/{rest}"
+
+        # Fallback: treat as Unix-style without leading slash
+        return "/" + encoded.replace("-", "/")
 
     @staticmethod
     def _extract_real_path_from_sessions(project_dir: Path) -> Optional[str]:
@@ -157,9 +198,9 @@ class Project(BaseModel):
                         try:
                             data = json.loads(line.strip())
                             cwd = data.get("cwd")
-                            # Validate cwd is an absolute path
-                            if cwd and Path(cwd).is_absolute():
-                                return cwd
+                            if cwd and _is_absolute_path(cwd):
+                                # Normalize Windows backslashes to forward slashes
+                                return cwd.replace("\\", "/")
                         except json.JSONDecodeError:
                             continue
             except (OSError, PermissionError, UnicodeDecodeError):

@@ -22,6 +22,27 @@ if TYPE_CHECKING:
     from models.session import Session
 
 
+def is_encoded_project_dir(name: str) -> bool:
+    """
+    Check if a directory name looks like a Claude-encoded project path.
+
+    Unix paths encode as:   -Users-me-repo   (leading dash from leading slash)
+    Windows paths encode as: C--Code-Tools   (drive letter + double-dash)
+
+    This is used to filter out non-project dirs like 'memory/', '__pycache__/', etc.
+
+    Note: The Windows check (single letter + '--') could theoretically match
+    non-path dirs like 'a--something', but Claude Code never creates such names
+    in ~/.claude/projects/.
+    """
+    if name.startswith("-") and len(name) > 1:
+        return True
+    # Windows: single drive letter followed by -- (e.g. C--, D--)
+    if re.match(r"^[A-Za-z]--", name):
+        return True
+    return False
+
+
 def local_timezone() -> timezone:
     """Return the machine's current local timezone as a fixed-offset timezone.
 
@@ -426,7 +447,7 @@ def _list_all_projects_impl() -> list:
 
     # First pass: collect normal projects and identify worktree dirs
     for encoded_dir in projects_dir.iterdir():
-        if not encoded_dir.is_dir() or not encoded_dir.name.startswith("-"):
+        if not encoded_dir.is_dir() or not is_encoded_project_dir(encoded_dir.name):
             continue
         if is_worktree_project(encoded_dir.name):
             worktree_dirs.append(encoded_dir)
@@ -755,7 +776,8 @@ def get_tool_summary(block, working_dirs: list[str] | None = None) -> tuple[str,
         return "Read file", to_relative(path), {"path": path}
     elif tool_name == "Write":
         path = tool_input.get("path") or tool_input.get("file_path", "")
-        return "Write file", to_relative(path), {"path": path}
+        content = tool_input.get("content", "")
+        return "Write file", to_relative(path), {"path": path, "content": content}
     elif tool_name == "Edit" or tool_name == "StrReplace":
         path = tool_input.get("path") or tool_input.get("file_path", "")
         return "Edit file", to_relative(path), {"path": path}
