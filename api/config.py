@@ -88,6 +88,8 @@ class Settings(BaseSettings):
         default=[
             "http://localhost:3000",
             "http://127.0.0.1:3000",
+            "http://localhost:2456",
+            "http://127.0.0.1:2456",
             "http://localhost:5173",
             "http://127.0.0.1:5173",
             "http://localhost:3001",

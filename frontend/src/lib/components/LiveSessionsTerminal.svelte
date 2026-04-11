@@ -165,7 +165,8 @@
 		checkStuckSessions();
 		// Poll every 1 second for real-time status monitoring
 		// TODO: Replace with SSE for true real-time
-		pollInterval = setInterval(fetchSessions, 1000);
+		// DISABLED: No polling - only historical sessions
+		// pollInterval = setInterval(fetchSessions, 1000);
 	});
 
 	onDestroy(() => {

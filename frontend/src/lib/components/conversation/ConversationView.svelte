@@ -275,22 +275,23 @@
 	});
 
 	// Polling watchdog: restart polling if it stopped while session is still live
-	$effect(() => {
-		if (!browser || !isCurrentlyLive) return;
+	// DISABLED: No live polling - only historical sessions
+	// $effect(() => {
+	// 	if (!browser || !isCurrentlyLive) return;
 
-		// Check every 10 seconds if polling has stopped unexpectedly
-		const watchdogInterval = setInterval(() => {
-			// If session is live but no poll is scheduled or in progress, restart
-			if (isCurrentlyLive && !pollTimeout && !isPolling) {
-				console.log('[Polling Watchdog] Restarting stopped polling for live session');
-				startPolling();
-			}
-		}, 10000);
+	// 	// Check every 10 seconds if polling has stopped unexpectedly
+	// 	const watchdogInterval = setInterval(() => {
+	// 		// If session is live but no poll is scheduled or in progress, restart
+	// 		if (isCurrentlyLive && !pollTimeout && !isPolling) {
+	// 			console.log('[Polling Watchdog] Restarting stopped polling for live session');
+	// 			startPolling();
+	// 		}
+	// 	}, 10000);
 
-		return () => {
-			clearInterval(watchdogInterval);
-		};
-	});
+	// 	return () => {
+	// 		clearInterval(watchdogInterval);
+	// 	};
+	// });
 
 	function toggleTailing() {
 		isTailing = !isTailing;

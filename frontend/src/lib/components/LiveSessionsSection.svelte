@@ -317,7 +317,8 @@
 		fetchSessions();
 		checkStuckSessions();
 		// Poll every 3 seconds for live session status
-		pollInterval = setInterval(fetchSessions, POLL_INTERVAL);
+		// DISABLED: No polling - only historical sessions
+		// pollInterval = setInterval(fetchSessions, POLL_INTERVAL);
 	});
 
 	onDestroy(() => {
