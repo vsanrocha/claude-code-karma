@@ -9,7 +9,9 @@ available (free, no LLM). Falls back to Claude Haiku via
 
 """
 
+import fcntl
 import json
+import logging
 import os
 import re
 import subprocess
@@ -18,6 +20,22 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 API_BASE = os.environ.get("CLAUDE_KARMA_API", "http://localhost:8000")
+TITLE_MODEL = os.environ.get("CLAUDE_KARMA_TITLE_MODEL", "minimax/minimax-m2.5-pro-free")
+
+# Logging setup
+LOG_DIR = Path(os.path.expanduser("~/.claude_karma"))
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+logging.basicConfig(
+    filename=str(LOG_DIR / "title-generator.log"),
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+log = logging.getLogger("title-gen")
+
+# Lock and queue
+KARMA_BASE = Path(os.path.expanduser("~/.claude_karma"))
+WORKER_LOCK = KARMA_BASE / ".title-worker.lock"
 MAX_PROMPT_LENGTH = 500
 MAX_RESPONSE_LENGTH = 300
 TITLE_MAX_WORDS = 10
@@ -65,10 +83,109 @@ def _get_session_start_iso(transcript_path: str) -> Optional[str]:
     return None
 
 
+def _acquire_worker_lock():
+    """Return lock file handle if acquired, None if another worker is running."""
+    try:
+        fh = open(WORKER_LOCK, "w")
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return fh
+    except OSError:
+        fh.close() if 'fh' in locals() else None
+        return None
+
+
+def _drain_retry_queue() -> None:
+    """Process all pending retries in ~/.claude_karma/title-retry/."""
+    retry_dir = KARMA_BASE / "title-retry"
+    if not retry_dir.exists():
+        return
+    for path in sorted(retry_dir.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            path.unlink(missing_ok=True)
+            continue
+
+        session_id = data.get("session_id", "")
+        title, source = generate_title(
+            data.get("initial_prompt", ""),
+            data.get("first_response"),
+            data.get("git_context"),
+        )
+        if title:
+            if post_title(session_id, title):
+                path.unlink(missing_ok=True)
+                log.info("Drained retry: session=%s source=%s", session_id[:12], source)
+        elif source in ("rate_limited", "timeout"):
+            log.warning("Retry still failing (%s), leaving in queue", source)
+            break
+
+
 def main():
+    # Background mode: called from detached subprocess with context file
+    if len(sys.argv) > 1 and sys.argv[1] == "--background":
+        if len(sys.argv) < 3:
+            log.warning("Background: missing context file arg")
+            return
+
+        context_file = Path(sys.argv[2])
+        if not context_file.exists():
+            log.warning("Background: context file not found: %s", context_file)
+            return
+
+        try:
+            data = json.loads(context_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as e:
+            log.error("Background: failed to read context file: %s", e)
+            return
+        finally:
+            context_file.unlink(missing_ok=True)
+
+        # Try to acquire lock (non-blocking)
+        lock_fh = _acquire_worker_lock()
+        if not lock_fh:
+            log.info("Background: lock busy, enqueuing for later retry")
+            # Enqueue this session for retry
+            enqueue_title_retry(
+                data.get("session_id", ""),
+                data.get("transcript_path", ""),
+                data.get("initial_prompt", ""),
+                data.get("first_response"),
+                data.get("cwd", ""),
+            )
+            return
+
+        try:
+            # Generate title for this session
+            title, source = generate_title(
+                data.get("initial_prompt", ""),
+                data.get("first_response"),
+                data.get("git_context"),
+            )
+            if title:
+                post_title(data.get("session_id", ""), title)
+            elif source in ("rate_limited", "timeout"):
+                enqueue_title_retry(
+                    data.get("session_id", ""),
+                    data.get("transcript_path", ""),
+                    data.get("initial_prompt", ""),
+                    data.get("first_response"),
+                    data.get("cwd", ""),
+                )
+
+            # Drain the full retry queue before releasing lock
+            log.info("Background: draining retry queue")
+            _drain_retry_queue()
+        finally:
+            fcntl.flock(lock_fh, fcntl.LOCK_UN)
+            lock_fh.close()
+        return
+
+    # Normal hook mode: called with stdin JSON
     try:
         data = json.loads(sys.stdin.read())
     except (json.JSONDecodeError, EOFError):
+        log.warning("Failed to parse stdin JSON")
         return
 
     session_id = data.get("session_id", "")
@@ -76,25 +193,47 @@ def main():
     cwd = data.get("cwd", "")
     reason = data.get("reason", "")
 
+    log.info("SessionEnd hook fired — session=%s reason=%s", session_id[:12], reason)
+
     # Skip if no transcript or if cleared (not meaningful sessions)
     if not transcript_path or not Path(transcript_path).exists():
+        log.info("Skipped — no transcript found")
         return
-    if reason in ("clear",):
+    if reason in ("clear", "resume"):
+        log.info("Skipped — reason is %r", reason)
         return
 
-    # Extract context from JSONL
+    # Extract context from JSONL (fast, no network)
     initial_prompt, first_response = extract_session_context(transcript_path)
     if not initial_prompt:
+        log.info("Skipped — no initial prompt extracted")
         return
 
-    # Get git commits during session
+    # Get git commits during session (fast, local)
     git_context = get_git_context(cwd, transcript_path)
 
-    # Generate title
-    title, source = generate_title(initial_prompt, first_response, git_context)
+    # Spawn background process to generate title (non-blocking)
+    context_payload = json.dumps({
+        "session_id": session_id,
+        "transcript_path": transcript_path,
+        "initial_prompt": initial_prompt,
+        "first_response": first_response,
+        "cwd": cwd,
+        "git_context": git_context,
+    })
 
-    if title:
-        post_title(session_id, title)
+    context_file = Path(f"/tmp/session_title_{session_id}.json")
+    context_file.write_text(context_payload, encoding="utf-8")
+
+    log.info("Spawning background process for title generation")
+
+    subprocess.Popen(
+        [sys.executable, __file__, "--background", str(context_file)],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
 
 
 def extract_session_context(transcript_path: str) -> Tuple[Optional[str], Optional[str]]:
@@ -194,7 +333,7 @@ def generate_title(
                 title = " ".join(words[:TITLE_MAX_WORDS])
             return title, "git"
 
-    # 2. Fall back to Haiku (with --no-session-persistence to avoid session bloat)
+    # 2. Fall back to opencode with free model
     parts = [f"User asked: {initial_prompt}"]
     if first_response:
         parts.append(f"Assistant did: {first_response}")
@@ -210,13 +349,13 @@ Title:"""
 
     try:
         env = os.environ.copy()
-        env.pop("CLAUDECODE", None)  # Allow nested claude invocation
+        env.pop("CLAUDECODE", None)
 
         result = subprocess.run(
-            ["claude", "-p", prompt, "--model", "haiku", "--no-session-persistence", "--output-format", "text"],
+            ["opencode", "run", prompt, "--model", TITLE_MODEL],
             capture_output=True,
             text=True,
-            timeout=12,
+            timeout=30,
             env=env,
         )
 
@@ -226,7 +365,7 @@ Title:"""
             words = title.split()
             if len(words) > TITLE_MAX_WORDS:
                 title = " ".join(words[:TITLE_MAX_WORDS])
-            return title, "haiku"
+            return title, "opencode"
 
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         pass
@@ -236,6 +375,33 @@ Title:"""
     if len(initial_prompt) > 60:
         fallback += "..."
     return fallback, "fallback"
+
+
+def enqueue_title_retry(
+    session_id: str,
+    transcript_path: str,
+    initial_prompt: str,
+    first_response: Optional[str],
+    cwd: str,
+) -> None:
+    """Save session context to the retry queue for later processing."""
+    try:
+        retry_dir = KARMA_BASE / "title-retry"
+        retry_dir.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "session_id": session_id,
+            "transcript_path": transcript_path,
+            "initial_prompt": initial_prompt,
+            "first_response": first_response,
+            "cwd": cwd,
+            "git_context": get_git_context(cwd, transcript_path),
+        }
+        (retry_dir / f"{session_id}.json").write_text(
+            json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+        )
+        log.info("Enqueued retry for session=%s", session_id[:12])
+    except OSError as e:
+        log.error("Failed to enqueue retry: %s", e)
 
 
 def post_title(session_id: str, title: str) -> bool:

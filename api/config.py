@@ -105,6 +105,12 @@ class Settings(BaseSettings):
         description="Allowed headers for CORS",
     )
 
+    # Title generation
+    title_model: str = Field(
+        default="minimax/minimax-m2.5-pro-free",
+        description="Model used by opencode for session title generation (CLAUDE_KARMA_TITLE_MODEL)",
+    )
+
     # Logging
     log_level: str = Field(
         default="INFO", description="Logging level (DEBUG, INFO, WARNING, ERROR)"
